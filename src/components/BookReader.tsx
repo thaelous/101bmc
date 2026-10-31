@@ -107,7 +107,7 @@ export const BookReader: React.FC<BookReaderProps> = ({
   // URL del PDF protegida y sincronizada a la página exacta del capítulo
   const protectedPdfSrc = useMemo(() => {
     if (!pdfUrl) return null;
-    return `${pdfUrl}#page=${targetPage}&toolbar=0&navpanes=0&scrollbar=0&view=FitH&pagemode=none`;
+    return `${pdfUrl}#toolbar=0&navpanes=0&scrollbar=0&page=${targetPage}`;
   }, [pdfUrl, targetPage]);
 
   // Sincronizar dinámicamente el iframe cuando cambia el capítulo
@@ -262,6 +262,7 @@ export const BookReader: React.FC<BookReaderProps> = ({
             {/* Visor oficial protegido sin barra de herramientas, descarga ni impresión */}
             <iframe
               ref={iframeRef}
+              key={`pdf-page-${targetPage}`}
               src={protectedPdfSrc}
               title={`Libro Digital — ${currentChapterTitle}`}
               className="w-full flex-1 min-h-[75vh] border-0 select-none bg-slate-100"
