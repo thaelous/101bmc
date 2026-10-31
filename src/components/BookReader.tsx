@@ -221,7 +221,10 @@ export const BookReader: React.FC<BookReaderProps> = ({
       </div>
 
       {/* ÁREA PRINCIPAL: VISOR EXCLUSIVO Y PROTEGIDO DEL LIBRO DIGITAL */}
-      <div className="flex-1 min-h-[70vh] sm:min-h-[80vh] flex flex-col rounded-3xl overflow-hidden glass-card shadow-xl relative border border-white/80">
+      <div 
+        className="w-full flex-1 flex flex-col rounded-3xl overflow-hidden glass-card shadow-xl relative border border-white/80 bg-white"
+        style={{ minHeight: '650px' }}
+      >
         
         {isLoadingPdf ? (
           <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-white/60 min-h-[70vh]">
@@ -256,16 +259,17 @@ export const BookReader: React.FC<BookReaderProps> = ({
           </div>
         ) : protectedPdfSrc ? (
           <div 
-            className="flex-1 flex flex-col relative w-full h-full bg-slate-900 min-h-[75vh] select-none"
+            className="w-full h-[600px] sm:h-[680px] lg:h-[750px] relative bg-white rounded-2xl overflow-hidden flex flex-col border border-slate-200 select-none"
+            style={{ height: '650px', width: '100%', minHeight: '600px' }}
             onContextMenu={(e) => e.preventDefault()}
           >
-            {/* Visor oficial protegido sin barra de herramientas, descarga ni impresión */}
+            {/* Visor oficial protegido sin barra de herramientas, descarga ni impresión con altura explícita */}
             <iframe
               ref={iframeRef}
-              key={`pdf-page-${targetPage}`}
               src={protectedPdfSrc}
               title={`Libro Digital — ${currentChapterTitle}`}
-              className="w-full flex-1 min-h-[75vh] border-0 select-none bg-slate-100"
+              style={{ height: '100%', width: '100%', minHeight: '580px' }}
+              className="w-full h-full flex-1 border-0 select-none bg-white"
             />
 
             {/* Barra inferior de estado y seguridad del documento */}
