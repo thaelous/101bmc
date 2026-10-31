@@ -1,0 +1,39 @@
+{
+  "id": "/",
+  "name": "101 Buenos Malos Consejos Para Mi Hijo",
+  "short_name": "101 Consejos",
+  "description": "Edición oficial del libro digital y audiolibro '101 Buenos Malos Consejos Para Mi Hijo' por Robert Pacheco.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#1e5ad9",
+  "theme_color": "#1e5ad9",
+  "categories": ["books", "entertainment", "lifestyle"],
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

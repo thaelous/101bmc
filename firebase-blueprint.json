@@ -1,0 +1,35 @@
+{
+  "entities": {
+    "Codigo": {
+      "title": "Codigo",
+      "description": "Código de canje y licencia para desbloquear el libro digital y audiolibro.",
+      "type": "object",
+      "properties": {
+        "codigo": {
+          "type": "string",
+          "description": "Código alfanumérico único entregado tras la compra."
+        },
+        "canjeado": {
+          "type": "boolean",
+          "description": "Indica si el código ya fue quemado/utilizado."
+        },
+        "usado_por": {
+          "type": "string",
+          "description": "Correo electrónico de Google del usuario que canjeó la licencia."
+        },
+        "fecha_canje": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Fecha y hora en que se canjeó el código."
+        }
+      },
+      "required": ["codigo", "canjeado"]
+    }
+  },
+  "firestore": {
+    "/codigos/{codigoId}": {
+      "schema": "Codigo",
+      "description": "Colección de códigos de activación para '101 Buenos Malos Consejos'."
+    }
+  }
+}

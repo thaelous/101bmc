@@ -1,0 +1,6 @@
+{
+  "name": "101 Buenos Malos Consejos Para Mi Hijo",
+  "description": "Plataforma oficial del libro digital y audiolibro '101 Buenos Malos Consejos Para Mi Hijo' por Robert Pacheco.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

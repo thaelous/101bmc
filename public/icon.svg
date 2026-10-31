@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <radialGradient id="pwa-bg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#22271e"/>
+      <stop offset="100%" stop-color="#121411"/>
+    </radialGradient>
+    <linearGradient id="mustard" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f5cc50"/>
+      <stop offset="100%" stop-color="#e5b838"/>
+    </linearGradient>
+    <linearGradient id="olive" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#7e9158"/>
+      <stop offset="100%" stop-color="#556338"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="512" height="512" rx="108" fill="url(#pwa-bg)"/>
+  <rect x="20" y="20" width="472" height="472" rx="92" fill="none" stroke="#3d4533" stroke-width="4"/>
+
+  <!-- Character Puppet Circle Center -->
+  <circle cx="256" cy="235" r="145" fill="#1b2018" stroke="#6b7b4a" stroke-width="5"/>
+
+  <!-- Torso & Olive Jacket -->
+  <path d="M140 370 C155 300, 190 280, 256 280 C322 280, 357 300, 372 370 Z" fill="url(#olive)"/>
+  <path d="M220 285 L256 325 L210 338 Z" fill="url(#mustard)"/>
+  <path d="M292 285 L256 325 L302 338 Z" fill="url(#mustard)"/>
+
+  <!-- Head -->
+  <ellipse cx="256" cy="190" rx="76" ry="84" fill="#c9955f" stroke="#8d5b2c" stroke-width="2.5"/>
+
+  <!-- Eyes -->
+  <circle cx="225" cy="175" r="14" fill="#ffffff"/>
+  <circle cx="227" cy="175" r="9" fill="#1b1c1b"/>
+  <circle cx="229" cy="172" r="3" fill="#ffffff"/>
+  <circle cx="287" cy="175" r="14" fill="#ffffff"/>
+  <circle cx="285" cy="175" r="9" fill="#1b1c1b"/>
+  <circle cx="283" cy="172" r="3" fill="#ffffff"/>
+
+  <!-- Eyebrows -->
+  <path d="M208 155 Q228 145 242 158" stroke="#1a1410" stroke-width="7" stroke-linecap="round"/>
+  <path d="M304 155 Q284 145 270 158" stroke="#1a1410" stroke-width="7" stroke-linecap="round"/>
+
+  <!-- Nose -->
+  <ellipse cx="256" cy="193" rx="16" ry="12" fill="#ba7c47"/>
+
+  <!-- Mouth line -->
+  <line x1="222" y1="222" x2="290" y2="222" stroke="#4a1e1b" stroke-width="4.5" stroke-linecap="round"/>
+
+  <!-- Beard & Mustache -->
+  <path d="M216 208 Q240 204 256 214 Q272 204 296 208 Q280 230 256 226 Q232 230 216 208 Z" fill="#1b1410"/>
+  <path d="M190 200 C182 245, 195 300, 256 312 C317 300, 330 245, 322 200 C310 235, 298 255, 280 258 C270 248, 262 248, 256 250 C250 248, 242 248, 232 258 C214 255, 202 235, 190 200 Z" fill="#18130f"/>
+
+  <!-- Bottom Brand Text -->
+  <text x="256" y="440" text-anchor="middle" font-family="'Outfit', sans-serif" font-weight="900" font-size="28" fill="url(#mustard)" letter-spacing="3">101 BUENOS MALOS CONSEJOS</text>
+  <text x="256" y="468" text-anchor="middle" font-family="'Outfit', sans-serif" font-weight="600" font-size="16" fill="#8d9d70" letter-spacing="2">POR ROBERT PACHECO</text>
+</svg>
