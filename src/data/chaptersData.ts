@@ -34,7 +34,7 @@ export const titulosOficiales: Record<number, string> = {
   11: "1 - Haz lo que quieras",
   12: "2 - Nunca hieras",
   13: "3 - El sentido de la vida",
-  14: "4 - Ladrón de culuas",
+  14: "4 - Ladrón de culpas",
   15: "5 - Anécdota de los errores",
   16: "6 - La escuela y la vida",
   17: "7 - La vida y la puerta",

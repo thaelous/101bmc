@@ -15,8 +15,8 @@ import { usePWAInstall, useOnlineStatus } from '../hooks/usePWAInstall';
 
 interface NavbarProps {
   user: UserProfile;
-  activeTab: 'combo' | 'audio' | 'book';
-  onTabChange: (tab: 'combo' | 'audio' | 'book') => void;
+  activeTab: 'audio' | 'book';
+  onTabChange: (tab: 'audio' | 'book') => void;
   onLogout: () => void;
   licenseCode?: string;
 }
@@ -38,8 +38,8 @@ export const Navbar: React.FC<NavbarProps> = ({
       <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-xl border-b border-white/60 shadow-md">
         <div className="max-w-7xl mx-auto px-3 sm:px-6 h-18 flex items-center justify-between">
           
-          {/* Logo y Marca Oficial de buenosmalosconsejos.com */}
-          <div className="flex items-center gap-2 sm:gap-3 cursor-pointer" onClick={() => onTabChange('combo')}>
+          {/* Logo y Marca Oficial */}
+          <div className="flex items-center gap-2 sm:gap-3 cursor-pointer" onClick={() => onTabChange('audio')}>
             <img
               src="/logo.png"
               alt="Logo 101 Buenos Malos Consejos"
@@ -56,43 +56,30 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           </div>
 
-          {/* Selector de Pestañas: Combo Dual, Audiolibro y Libro */}
-          <nav className="flex items-center gap-1 p-1 rounded-2xl bg-white/70 border border-white/90 shadow-inner">
-            <button
-              onClick={() => onTabChange('combo')}
-              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold tracking-wide transition-all duration-200 ${
-                activeTab === 'combo'
-                  ? 'bg-[#7c3aed] text-white shadow-md shadow-[#7c3aed]/30'
-                  : 'text-[#0f2147] hover:bg-white/80'
-              }`}
-              title="Ver Audiolibro y Libro Digital al lado"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-              <span>Combo</span>
-            </button>
-
+          {/* Dos Secciones Independientes: Audiolibro y Libro Digital */}
+          <nav className="flex items-center gap-1.5 p-1 rounded-2xl bg-white/80 border border-white shadow-inner">
             <button
               onClick={() => onTabChange('audio')}
-              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold tracking-wide transition-all duration-200 ${
+              className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-black tracking-wide transition-all duration-200 ${
                 activeTab === 'audio'
                   ? 'bg-[#7c3aed] text-white shadow-md shadow-[#7c3aed]/30'
-                  : 'text-[#0f2147] hover:bg-white/80'
+                  : 'text-[#0f2147] hover:bg-white/90'
               }`}
             >
-              <Headphones className="w-3.5 h-3.5" />
-              <span>Audio</span>
+              <Headphones className="w-4 h-4" />
+              <span>Audiolibro</span>
             </button>
 
             <button
               onClick={() => onTabChange('book')}
-              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold tracking-wide transition-all duration-200 ${
+              className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-black tracking-wide transition-all duration-200 ${
                 activeTab === 'book'
                   ? 'bg-[#7c3aed] text-white shadow-md shadow-[#7c3aed]/30'
-                  : 'text-[#0f2147] hover:bg-white/80'
+                  : 'text-[#0f2147] hover:bg-white/90'
               }`}
             >
-              <BookOpen className="w-3.5 h-3.5" />
-              <span>Libro</span>
+              <BookOpen className="w-4 h-4" />
+              <span>Libro Digital</span>
             </button>
           </nav>
 
