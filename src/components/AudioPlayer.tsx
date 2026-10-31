@@ -135,7 +135,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
       console.warn(`[AudioPlayer] No se pudo reproducir audio de ${currentTrack.filename}`);
       setIsLoadingAudioUrl(false);
       setIsPlaying(false);
-      setAudioError(`No se pudo reproducir el archivo ${currentTrack.filename} desde Firebase Storage. Comprueba tu conexión o permisos.`);
+      setAudioError('No se pudo reproducir el audio del capítulo. Comprueba tu conexión a internet.');
     };
 
     audio.addEventListener('loadedmetadata', handleLoadedMetadata);
@@ -257,11 +257,11 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
           setIsPlaying(true);
           setAudioError(null);
         } else {
-          setAudioError(`No se encontró el archivo de audio para ${currentTrack.filename} en audiolibro/.`);
+          setAudioError('No se pudo encontrar el audio del capítulo actual.');
         }
       } catch (err: any) {
         console.warn('[AudioPlayer] Error al reproducir audio mediante getDownloadURL():', err);
-        setAudioError(`No se pudo obtener ${currentTrack.filename} desde Firebase Storage: ${err?.message || 'Archivo no accesible'}`);
+        setAudioError('No se pudo cargar el audio. Por favor, intenta de nuevo.');
       } finally {
         setIsLoadingAudioUrl(false);
       }
