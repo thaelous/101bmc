@@ -617,12 +617,12 @@ export async function getDigitalBookPdfUrl(): Promise<{ url: string | null; erro
 
     return {
       url: null,
-      error: 'No se pudo cargar el libro digital. Por favor, verifica tu conexión.'
+      error: `No se pudo obtener el archivo 101BMC.pdf mediante getDownloadURL(): ${err?.message || 'Archivo no encontrado en Firebase Storage'}`
     };
   }
 
   return {
     url: null,
-    error: 'No se pudo resolver el libro digital.'
+    error: 'No se pudo resolver la URL para 101BMC.pdf mediante getDownloadURL().'
   };
 }

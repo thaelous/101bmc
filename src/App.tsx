@@ -171,7 +171,7 @@ export default function App() {
                 </span>
               </div>
               <p className="text-slate-600 font-medium">
-                Escucha los 113 capítulos sincronizados en tiempo real con la lectura del libro digital.
+                Escucha los 113 capítulos a la izquierda mientras disfrutas del visor oficial <strong className="font-mono text-[#7c3aed]">101BMC.pdf</strong> al lado.
               </p>
             </div>
 
