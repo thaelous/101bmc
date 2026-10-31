@@ -7,15 +7,16 @@ import {
   WifiOff, 
   ShieldCheck, 
   Share2,
-  X
+  X,
+  Sparkles
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { usePWAInstall, useOnlineStatus } from '../hooks/usePWAInstall';
 
 interface NavbarProps {
   user: UserProfile;
-  activeTab: 'book' | 'audio';
-  onTabChange: (tab: 'book' | 'audio') => void;
+  activeTab: 'combo' | 'audio' | 'book';
+  onTabChange: (tab: 'combo' | 'audio' | 'book') => void;
   onLogout: () => void;
   licenseCode?: string;
 }
@@ -35,50 +36,63 @@ export const Navbar: React.FC<NavbarProps> = ({
   return (
     <>
       <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-xl border-b border-white/60 shadow-md">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-18 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 h-18 flex items-center justify-between">
           
           {/* Logo y Marca Oficial de buenosmalosconsejos.com */}
-          <div className="flex items-center gap-3 cursor-pointer" onClick={() => onTabChange('audio')}>
+          <div className="flex items-center gap-2 sm:gap-3 cursor-pointer" onClick={() => onTabChange('combo')}>
             <img
               src="/logo.png"
               alt="Logo 101 Buenos Malos Consejos"
-              className="w-11 h-11 rounded-full object-cover shadow-md border-2 border-white flex-shrink-0"
+              className="w-10 h-10 sm:w-11 sm:h-11 rounded-full object-cover shadow-md border-2 border-white flex-shrink-0"
             />
             
             <div className="hidden sm:block">
-              <h1 className="font-heading font-black text-sm tracking-tight text-[#0f2147] uppercase leading-tight">
+              <h1 className="font-heading font-black text-xs sm:text-sm tracking-tight text-[#0f2147] uppercase leading-tight">
                 101 BUENOS MALOS CONSEJOS <span className="text-[#7c3aed]">PARA MI HIJO</span>
               </h1>
-              <p className="text-[11px] text-[#0f2147]/80 font-medium italic">
+              <p className="text-[10px] sm:text-[11px] text-[#0f2147]/80 font-medium italic">
                 Por Robert Pacheco
               </p>
             </div>
           </div>
 
-          {/* Selector de Pestañas: Audiolibro y Libro */}
-          <nav className="flex items-center gap-1.5 p-1 rounded-2xl bg-white/70 border border-white/90 shadow-inner">
+          {/* Selector de Pestañas: Combo Dual, Audiolibro y Libro */}
+          <nav className="flex items-center gap-1 p-1 rounded-2xl bg-white/70 border border-white/90 shadow-inner">
+            <button
+              onClick={() => onTabChange('combo')}
+              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold tracking-wide transition-all duration-200 ${
+                activeTab === 'combo'
+                  ? 'bg-[#7c3aed] text-white shadow-md shadow-[#7c3aed]/30'
+                  : 'text-[#0f2147] hover:bg-white/80'
+              }`}
+              title="Ver Audiolibro y Libro Digital al lado"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+              <span>Combo</span>
+            </button>
+
             <button
               onClick={() => onTabChange('audio')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold tracking-wide transition-all duration-200 ${
+              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold tracking-wide transition-all duration-200 ${
                 activeTab === 'audio'
                   ? 'bg-[#7c3aed] text-white shadow-md shadow-[#7c3aed]/30'
                   : 'text-[#0f2147] hover:bg-white/80'
               }`}
             >
               <Headphones className="w-3.5 h-3.5" />
-              <span>Audiolibro</span>
+              <span>Audio</span>
             </button>
 
             <button
               onClick={() => onTabChange('book')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold tracking-wide transition-all duration-200 ${
+              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold tracking-wide transition-all duration-200 ${
                 activeTab === 'book'
                   ? 'bg-[#7c3aed] text-white shadow-md shadow-[#7c3aed]/30'
                   : 'text-[#0f2147] hover:bg-white/80'
               }`}
             >
               <BookOpen className="w-3.5 h-3.5" />
-              <span>Libro Digital</span>
+              <span>Libro</span>
             </button>
           </nav>
 
