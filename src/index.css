@@ -75,3 +75,11 @@ input[type="range"]::-webkit-slider-thumb:hover {
   transform: scale(1.25);
   background: #8b5cf6;
 }
+
+/* Protección antipiratería: deshabilitar impresión */
+@media print {
+  html, body {
+    display: none !important;
+    visibility: hidden !important;
+  }
+}

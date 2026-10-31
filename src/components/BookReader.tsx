@@ -3,8 +3,6 @@ import {
   FileText, 
   Maximize2, 
   Minimize2, 
-  Download, 
-  ExternalLink, 
   RotateCcw, 
   ShieldCheck, 
   AlertCircle, 
@@ -87,6 +85,17 @@ export const BookReader: React.FC<BookReaderProps> = ({
     return () => document.removeEventListener('fullscreenchange', handleFsChange);
   }, []);
 
+  // Bloqueo de atajos de teclado para descarga e impresión (Ctrl+P, Ctrl+S)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P' || e.key === 's' || e.key === 'S')) {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   return (
     <div 
       ref={containerRef}
@@ -157,18 +166,11 @@ export const BookReader: React.FC<BookReaderProps> = ({
             <RefreshCw className={`w-4 h-4 ${isLoadingPdf ? 'animate-spin text-[#7c3aed]' : ''}`} />
           </button>
 
-          {/* Botón Abrir en nueva ventana */}
-          {pdfUrl && (
-            <a
-              href={pdfUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="p-2 rounded-xl bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 transition"
-              title="Abrir PDF en pestaña nueva"
-            >
-              <ExternalLink className="w-4 h-4" />
-            </a>
-          )}
+          {/* Indicador de Lectura Protegida (Anti-descarga) */}
+          <div className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-bold">
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Lectura Protegida</span>
+          </div>
 
           {/* Botón Pantalla Completa */}
           <button
@@ -237,69 +239,27 @@ export const BookReader: React.FC<BookReaderProps> = ({
               </div>
             </div>
           ) : pdfUrl ? (
-            <div className="flex-1 flex flex-col relative w-full h-full bg-slate-100 min-h-[75vh]">
-              {/* Embed oficial del PDF 101BMC.pdf */}
-              <object
-                data={`${pdfUrl}#toolbar=1&navpanes=1&scrollbar=1`}
-                type="application/pdf"
-                className="w-full flex-1 min-h-[75vh] border-0"
-              >
-                <div className="p-8 text-center bg-white flex flex-col items-center justify-center my-auto min-h-[50vh]">
-                  <FileText className="w-12 h-12 text-[#7c3aed] mb-3" />
-                  <h4 className="font-heading font-black text-base text-[#0f2147] mb-2">
-                    101BMC.pdf listo para visualizar
-                  </h4>
-                  <p className="text-xs text-slate-500 max-w-md mb-4">
-                    Tu navegador no soporta la visualización incrustada directa de PDF. Puedes abrirlo en el visor interactivo de Google o descargarlo de forma segura.
-                  </p>
-                  <div className="flex flex-wrap items-center justify-center gap-2">
-                    <a
-                      href={pdfUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#7c3aed] text-white text-xs font-bold hover:bg-[#6d28d9] transition shadow-md"
-                    >
-                      <ExternalLink className="w-4 h-4" />
-                      <span>Abrir 101BMC.pdf Oficial</span>
-                    </a>
-                    <a
-                      href={`https://docs.google.com/viewer?url=${encodeURIComponent(pdfUrl)}&embedded=true`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-100 text-[#0f2147] text-xs font-bold hover:bg-slate-200 transition"
-                    >
-                      <BookOpen className="w-4 h-4 text-[#7c3aed]" />
-                      <span>Visor Google Docs</span>
-                    </a>
-                  </div>
-                </div>
-              </object>
+            <div 
+              className="flex-1 flex flex-col relative w-full h-full bg-slate-900 min-h-[75vh] select-none"
+              onContextMenu={(e) => e.preventDefault()}
+            >
+              {/* Visor oficial protegido sin barra de herramientas, descarga ni impresión */}
+              <iframe
+                src={`${pdfUrl}#toolbar=0&navpanes=0&scrollbar=0&view=FitH&pagemode=none`}
+                title="101BMC.pdf — Visor Oficial Protegido"
+                className="w-full flex-1 min-h-[75vh] border-0 select-none bg-slate-100"
+              />
 
-              {/* Barra inferior de estado del documento */}
+              {/* Barra inferior de estado y seguridad del documento */}
               <div className="p-3 bg-white border-t border-slate-200 flex flex-wrap items-center justify-between text-xs text-slate-600 gap-2">
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                  <span>Archivo: <strong className="font-mono text-[#0f2147]">101BMC.pdf</strong> verificado &bull; Usuario: <span className="text-[#7c3aed] font-medium">{userEmail}</span></span>
+                  <span>Documento oficial verificado &bull; Usuario: <span className="text-[#7c3aed] font-bold">{userEmail}</span></span>
                 </div>
 
-                <div className="flex items-center gap-2 ml-auto">
-                  <a
-                    href={pdfUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-100 hover:bg-[#7c3aed] hover:text-white transition font-bold text-[11px]"
-                  >
-                    <ExternalLink className="w-3 h-3" />
-                    <span>Abrir en Pestaña Nueva</span>
-                  </a>
-                  <a
-                    href={`https://docs.google.com/viewer?url=${encodeURIComponent(pdfUrl)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition font-bold text-[11px]"
-                  >
-                    <span>Visor Docs</span>
-                  </a>
+                <div className="flex items-center gap-1.5 ml-auto text-slate-500 font-semibold text-[11px]">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Protección contra copia e impresión activada</span>
                 </div>
               </div>
             </div>

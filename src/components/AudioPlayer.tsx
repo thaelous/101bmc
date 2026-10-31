@@ -747,8 +747,8 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             </div>
 
             {/* Pie del Modal */}
-            <div className="p-3 border-t border-slate-100 bg-slate-50 text-center text-[11px] text-slate-500">
-              Total de archivos: <strong className="text-[#0f2147]">{tracks.length}</strong> &bull; Nomenclatura: <code className="font-mono text-[#7c3aed]">101bmc[NUMERO]of113.mp3</code>
+            <div className="p-3 border-t border-slate-100 bg-slate-50 text-center text-xs text-slate-500 font-medium">
+              101 Buenos Malos Consejos &bull; Robert Pacheco
             </div>
 
           </div>
