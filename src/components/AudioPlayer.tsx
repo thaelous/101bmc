@@ -32,12 +32,14 @@ interface AudioPlayerProps {
   currentChapterIndex?: number;
   onChapterSelect?: (index: number) => void;
   userEmail: string;
+  isSideBySide?: boolean;
 }
 
 export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   currentChapterIndex = 0,
   onChapterSelect,
-  userEmail
+  userEmail,
+  isSideBySide = false
 }) => {
   // Pistas dinámicas con títulos oficiales de Robert Pacheco (1 a 113)
   const [tracks, setTracks] = useState<AudioTrackItem[]>(() => generateDefault113Tracks());
@@ -373,11 +375,11 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
 
   return (
     <div 
-      className="max-w-4xl mx-auto px-4 py-6 sm:py-10 select-none"
+      className={`${isSideBySide ? 'w-full px-0 py-0' : 'max-w-4xl mx-auto px-4 py-6 sm:py-10'} select-none`}
       onContextMenu={(e) => e.preventDefault()}
     >
       {/* Tarjeta Central Estilo Celular Moderno */}
-      <div className="mx-auto max-w-sm sm:max-w-md rounded-[44px] bg-[#0f2147] p-4 sm:p-5 shadow-[0_25px_60px_-15px_rgba(15,33,71,0.5)] border-4 border-white/60 relative overflow-hidden">
+      <div className={`mx-auto ${isSideBySide ? 'max-w-md w-full' : 'max-w-sm sm:max-w-md'} rounded-[44px] bg-[#0f2147] p-4 sm:p-5 shadow-[0_25px_60px_-15px_rgba(15,33,71,0.5)] border-4 border-white/60 relative overflow-hidden`}>
         
         {/* Notch / Dynamic Island del Celular */}
         <div className="mx-auto w-28 h-4 rounded-full bg-black/60 mb-3 flex items-center justify-center">
@@ -661,13 +663,13 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
               <div className="mt-3 flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px] font-bold text-slate-600 scrollbar-none">
                 <span className="text-slate-400 mr-1 flex-shrink-0">Saltar a:</span>
                 {[
-                  { label: 'Prólogo', idx: 0 },
-                  { label: 'Consejos 1-20', idx: 1 },
-                  { label: 'Consejos 21-40', idx: 21 },
-                  { label: 'Consejos 41-60', idx: 41 },
-                  { label: 'Consejos 61-80', idx: 61 },
-                  { label: 'Consejos 81-101', idx: 81 },
-                  { label: 'Epílogo & Bonus', idx: 102 },
+                  { label: 'Portada / Intro', idx: 0 },
+                  { label: 'Consejos 1-20', idx: 10 },
+                  { label: 'Consejos 21-40', idx: 30 },
+                  { label: 'Consejos 41-60', idx: 50 },
+                  { label: 'Consejos 61-80', idx: 70 },
+                  { label: 'Consejos 81-100', idx: 90 },
+                  { label: 'Despedida', idx: 112 },
                 ].map((range) => (
                   <button
                     key={range.label}
