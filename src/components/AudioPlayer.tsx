@@ -135,7 +135,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
       console.warn(`[AudioPlayer] No se pudo reproducir audio de ${currentTrack.filename}`);
       setIsLoadingAudioUrl(false);
       setIsPlaying(false);
-      setAudioError(`No se pudo reproducir el archivo ${currentTrack.filename} desde Firebase Storage. Comprueba tu conexión o permisos.`);
+      setAudioError('No se pudo reproducir el audio del capítulo. Comprueba tu conexión a internet.');
     };
 
     audio.addEventListener('loadedmetadata', handleLoadedMetadata);
@@ -257,11 +257,11 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
           setIsPlaying(true);
           setAudioError(null);
         } else {
-          setAudioError(`No se encontró el archivo de audio para ${currentTrack.filename} en audiolibro/.`);
+          setAudioError('No se pudo encontrar el audio del capítulo actual.');
         }
       } catch (err: any) {
         console.warn('[AudioPlayer] Error al reproducir audio mediante getDownloadURL():', err);
-        setAudioError(`No se pudo obtener ${currentTrack.filename} desde Firebase Storage: ${err?.message || 'Archivo no accesible'}`);
+        setAudioError('No se pudo cargar el audio. Por favor, intenta de nuevo.');
       } finally {
         setIsLoadingAudioUrl(false);
       }
@@ -403,7 +403,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
               title="Abrir lista de reproducción completa"
             >
               <ListMusic className="w-3.5 h-3.5" />
-              <span>Pistas</span>
+              <span>Capítulos</span>
             </button>
           </div>
 
@@ -430,21 +430,13 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             </div>
           </div>
 
-          {/* Título Oficial del Capítulo, Archivo y Autor */}
-          <div className="mt-3">
-            <span className="text-[11px] font-extrabold text-[#7c3aed] tracking-wider uppercase block font-mono">
-              Pista {currentTrack.chapterNumber} de 113 &bull; {currentTrack.filename}
-            </span>
-            <h2 className="font-heading text-base sm:text-lg font-black text-[#0f2147] tracking-tight leading-snug mt-1">
+          {/* Título Oficial Limpio */}
+          <div className="mt-4">
+            <h2 className="font-heading text-lg sm:text-xl font-black text-[#0f2147] tracking-tight leading-snug">
               {currentTrack.title}
             </h2>
-            {currentTrack.subtitle && (
-              <p className="text-xs text-slate-600 font-medium mt-1 leading-snug line-clamp-2">
-                "{currentTrack.subtitle}"
-              </p>
-            )}
-            <p className="text-[11px] text-slate-400 font-medium italic mt-1">
-              Por Robert Pacheco &bull; Firebase Storage
+            <p className="text-xs text-slate-500 font-medium mt-1">
+              Robert Pacheco
             </p>
 
             {/* Aviso en caso de error de audio con botón de reintento */}
@@ -623,10 +615,10 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
               <div>
                 <h3 className="font-heading text-base sm:text-lg font-black text-[#0f2147] tracking-tight">
-                  Índice Oficial del Audiolibro ({tracks.length} Pistas)
+                  Capítulos del Audiolibro
                 </h3>
                 <p className="text-xs text-slate-500 font-medium">
-                  "101 Buenos Malos Consejos" por Robert Pacheco &bull; audiolibro/
+                  101 Buenos Malos Consejos &bull; Robert Pacheco
                 </p>
               </div>
 
@@ -646,7 +638,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Buscar por consejo (ej: 83), título (ej: dinero, disciplina) o archivo..."
+                  placeholder="Buscar capítulo o consejo..."
                   className="w-full pl-10 pr-9 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-medium text-[#0f2147] focus:outline-none focus:border-[#7c3aed] focus:ring-2 focus:ring-[#7c3aed]/10"
                 />
                 {searchQuery && (
@@ -663,13 +655,13 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
               <div className="mt-3 flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px] font-bold text-slate-600 scrollbar-none">
                 <span className="text-slate-400 mr-1 flex-shrink-0">Saltar a:</span>
                 {[
-                  { label: 'Prólogo', idx: 0 },
-                  { label: 'Consejos 1-20', idx: 1 },
-                  { label: 'Consejos 21-40', idx: 21 },
-                  { label: 'Consejos 41-60', idx: 41 },
-                  { label: 'Consejos 61-80', idx: 61 },
-                  { label: 'Consejos 81-101', idx: 81 },
-                  { label: 'Epílogo & Bonus', idx: 102 },
+                  { label: 'Portada / Intro', idx: 0 },
+                  { label: 'Consejos 1-20', idx: 10 },
+                  { label: 'Consejos 21-40', idx: 30 },
+                  { label: 'Consejos 41-60', idx: 50 },
+                  { label: 'Consejos 61-80', idx: 70 },
+                  { label: 'Consejos 81-100', idx: 90 },
+                  { label: 'Despedida', idx: 112 },
                 ].map((range) => (
                   <button
                     key={range.label}
@@ -720,18 +712,10 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
                           {track.chapterNumber}
                         </div>
 
-                        {/* Metadatos del archivo con Título Real */}
+                        {/* Título Oficial Limpio */}
                         <div className="overflow-hidden">
-                          <p className="text-xs font-black truncate text-[#0f2147]">
+                          <p className="text-xs sm:text-sm font-bold text-[#0f2147] truncate">
                             {track.title}
-                          </p>
-                          {track.subtitle && (
-                            <p className="text-[11px] text-slate-500 truncate">
-                              {track.subtitle}
-                            </p>
-                          )}
-                          <p className="text-[10px] text-slate-400 truncate font-mono mt-0.5">
-                            {track.filename} &bull; audiolibro/
                           </p>
                         </div>
                       </div>
@@ -763,8 +747,8 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             </div>
 
             {/* Pie del Modal */}
-            <div className="p-3 border-t border-slate-100 bg-slate-50 text-center text-[11px] text-slate-500">
-              Total de archivos: <strong className="text-[#0f2147]">{tracks.length}</strong> &bull; Nomenclatura: <code className="font-mono text-[#7c3aed]">101bmc[NUMERO]of113.mp3</code>
+            <div className="p-3 border-t border-slate-100 bg-slate-50 text-center text-xs text-slate-500 font-medium">
+              101 Buenos Malos Consejos &bull; Robert Pacheco
             </div>
 
           </div>
