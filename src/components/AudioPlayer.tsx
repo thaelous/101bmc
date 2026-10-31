@@ -32,14 +32,12 @@ interface AudioPlayerProps {
   currentChapterIndex?: number;
   onChapterSelect?: (index: number) => void;
   userEmail: string;
-  isSideBySide?: boolean;
 }
 
 export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   currentChapterIndex = 0,
   onChapterSelect,
-  userEmail,
-  isSideBySide = false
+  userEmail
 }) => {
   // Pistas dinámicas con títulos oficiales de Robert Pacheco (1 a 113)
   const [tracks, setTracks] = useState<AudioTrackItem[]>(() => generateDefault113Tracks());
@@ -375,11 +373,11 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
 
   return (
     <div 
-      className={`${isSideBySide ? 'w-full px-0 py-0' : 'max-w-4xl mx-auto px-4 py-6 sm:py-10'} select-none`}
+      className="max-w-4xl mx-auto px-4 py-6 sm:py-10 select-none"
       onContextMenu={(e) => e.preventDefault()}
     >
       {/* Tarjeta Central Estilo Celular Moderno */}
-      <div className={`mx-auto ${isSideBySide ? 'max-w-md w-full' : 'max-w-sm sm:max-w-md'} rounded-[44px] bg-[#0f2147] p-4 sm:p-5 shadow-[0_25px_60px_-15px_rgba(15,33,71,0.5)] border-4 border-white/60 relative overflow-hidden`}>
+      <div className="mx-auto max-w-sm sm:max-w-md rounded-[44px] bg-[#0f2147] p-4 sm:p-5 shadow-[0_25px_60px_-15px_rgba(15,33,71,0.5)] border-4 border-white/60 relative overflow-hidden">
         
         {/* Notch / Dynamic Island del Celular */}
         <div className="mx-auto w-28 h-4 rounded-full bg-black/60 mb-3 flex items-center justify-center">

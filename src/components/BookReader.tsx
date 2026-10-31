@@ -23,15 +23,13 @@ interface BookReaderProps {
   currentChapterIndex?: number;
   onChapterSelect?: (index: number) => void;
   userEmail: string;
-  isSideBySide?: boolean;
 }
 
 export const BookReader: React.FC<BookReaderProps> = ({
   chapters = [],
   currentChapterIndex = 0,
   onChapterSelect,
-  userEmail,
-  isSideBySide = false
+  userEmail
 }) => {
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [isLoadingPdf, setIsLoadingPdf] = useState(true);
@@ -90,7 +88,7 @@ export const BookReader: React.FC<BookReaderProps> = ({
   return (
     <div 
       ref={containerRef}
-      className={`w-full ${isSideBySide ? 'max-w-none px-0 py-0' : 'max-w-6xl mx-auto px-3 sm:px-6 py-4 sm:py-8'} flex-1 flex flex-col ${
+      className={`w-full max-w-6xl mx-auto px-3 sm:px-6 py-4 sm:py-8 flex-1 flex flex-col ${
         isFullscreen ? 'bg-slate-900 p-4 fixed inset-0 z-50 max-w-none' : ''
       }`}
     >

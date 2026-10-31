@@ -29,8 +29,8 @@ export default function App() {
   const [isCheckingLicense, setIsCheckingLicense] = useState(false);
   const [needsCodeRedemption, setNeedsCodeRedemption] = useState(false);
 
-  // Pestaña activa ('combo' por defecto: audiolibro y libro digital lado a lado)
-  const [activeTab, setActiveTab] = useState<'combo' | 'audio' | 'book'>('combo');
+  // Pestaña activa ('audio' por defecto, reproductor de audiolibro)
+  const [activeTab, setActiveTab] = useState<'book' | 'audio'>('audio');
   
   // Selección de capítulo
   const [currentChapterIndex, setCurrentChapterIndex] = useState(0);
@@ -159,60 +159,14 @@ export default function App() {
 
       {/* Contenido Principal Desbloqueado */}
       <main className="flex-1 flex flex-col">
-        {activeTab === 'combo' && (
-          <div className="w-full max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6 flex-1 flex flex-col">
-            
-            {/* Banner combo activo con badges informativos */}
-            <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 mb-4 rounded-2xl bg-white/80 border border-white/90 shadow-sm text-xs">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="font-heading font-black text-[#0f2147] uppercase tracking-wide">
-                  Combo Completo: Audiolibro y Libro Digital
-                </span>
-              </div>
-              <p className="text-slate-600 font-medium">
-                Escucha los 113 capítulos a la izquierda mientras disfrutas del visor oficial <strong className="font-mono text-[#7c3aed]">101BMC.pdf</strong> al lado.
-              </p>
-            </div>
-
-            {/* Disposición lado a lado en pantallas grandes, apilada en móviles */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start flex-1">
-              {/* Columna Izquierda: Reproductor del Audiolibro (113 pistas) */}
-              <div className="lg:col-span-5 xl:col-span-5 sticky lg:top-22">
-                <AudioPlayer
-                  chapters={BOOK_CHAPTERS}
-                  currentChapterIndex={currentChapterIndex}
-                  onChapterSelect={setCurrentChapterIndex}
-                  userEmail={currentUser.email}
-                  isSideBySide={true}
-                />
-              </div>
-
-              {/* Columna Derecha: Visor de Libro Digital (101BMC.pdf en Firebase Storage) */}
-              <div className="lg:col-span-7 xl:col-span-7 flex-1 flex flex-col min-h-[650px] lg:min-h-[820px]">
-                <BookReader
-                  chapters={BOOK_CHAPTERS}
-                  currentChapterIndex={currentChapterIndex}
-                  onChapterSelect={setCurrentChapterIndex}
-                  userEmail={currentUser.email}
-                  isSideBySide={true}
-                />
-              </div>
-            </div>
-
-          </div>
-        )}
-
-        {activeTab === 'audio' && (
+        {activeTab === 'audio' ? (
           <AudioPlayer
             chapters={BOOK_CHAPTERS}
             currentChapterIndex={currentChapterIndex}
             onChapterSelect={setCurrentChapterIndex}
             userEmail={currentUser.email}
           />
-        )}
-
-        {activeTab === 'book' && (
+        ) : (
           <BookReader
             chapters={BOOK_CHAPTERS}
             currentChapterIndex={currentChapterIndex}
