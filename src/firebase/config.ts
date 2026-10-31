@@ -32,7 +32,7 @@ import {
   listAll
 } from 'firebase/storage';
 import { CodigoDocument, UserProfile, AudioTrackItem } from '../types';
-import { getOfficialAudioTracks, OFFICIAL_113_CHAPTERS } from '../data/chaptersData';
+import { getOfficialAudioTracks, OFFICIAL_113_CHAPTERS, titulosOficiales } from '../data/chaptersData';
 
 // ============================================================================
 // CONFIGURACIÓN OFICIAL DE FIREBASE (libros-1f750)
@@ -518,21 +518,22 @@ export async function fetchAudiolibroTracksFromStorage(): Promise<AudioTrackItem
     }
 
     const foundNumbers = new Set<number>();
-    const storageTracks: AudioTrackItem[] = result.items.map((itemRef) => {
-      const filename = itemRef.name;
-      const chapterNumber = extractChapterNumberFromFilename(filename);
-      foundNumbers.add(chapterNumber);
+    const storageTracks: AudioTrackItem[] = result.items.map((item) => {
+      const name = item.name;
+      const match = name.match(/101bmc(\d+)of113/i);
+      const num = match ? parseInt(match[1], 10) : extractChapterNumberFromFilename(name);
+      foundNumbers.add(num);
 
-      const officialMeta = OFFICIAL_113_CHAPTERS.find(c => c.chapterNumber === chapterNumber);
+      const tituloReal = titulosOficiales[num] || `Capítulo ${num}`;
 
       return {
-        id: chapterNumber,
-        chapterNumber,
-        filename,
-        title: officialMeta ? officialMeta.title : `Capítulo ${chapterNumber} · 101 Buenos Malos Consejos`,
-        subtitle: officialMeta ? officialMeta.subtitle : `Pista oficial ${filename} · Audiolibro`,
-        storagePath: itemRef.fullPath || `audiolibro/${filename}`,
-        durationSeconds: officialMeta ? officialMeta.durationSeconds : 160
+        id: num,
+        chapterNumber: num,
+        filename: name,
+        title: tituloReal,
+        subtitle: `101 Buenos Malos Consejos · Robert Pacheco`,
+        storagePath: item.fullPath || `audiolibro/${name}`,
+        durationSeconds: 160
       };
     });
 

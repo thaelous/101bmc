@@ -663,13 +663,13 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
               <div className="mt-3 flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px] font-bold text-slate-600 scrollbar-none">
                 <span className="text-slate-400 mr-1 flex-shrink-0">Saltar a:</span>
                 {[
-                  { label: 'Prólogo', idx: 0 },
-                  { label: 'Consejos 1-20', idx: 1 },
-                  { label: 'Consejos 21-40', idx: 21 },
-                  { label: 'Consejos 41-60', idx: 41 },
-                  { label: 'Consejos 61-80', idx: 61 },
-                  { label: 'Consejos 81-101', idx: 81 },
-                  { label: 'Epílogo & Bonus', idx: 102 },
+                  { label: 'Portada / Intro', idx: 0 },
+                  { label: 'Consejos 1-20', idx: 10 },
+                  { label: 'Consejos 21-40', idx: 30 },
+                  { label: 'Consejos 41-60', idx: 50 },
+                  { label: 'Consejos 61-80', idx: 70 },
+                  { label: 'Consejos 81-100', idx: 90 },
+                  { label: 'Despedida', idx: 112 },
                 ].map((range) => (
                   <button
                     key={range.label}
