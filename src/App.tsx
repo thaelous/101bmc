@@ -93,8 +93,23 @@ export default function App() {
   }, []);
 
   const handleLogin = async () => {
-    const user = await loginWithGoogle();
-    setCurrentUser(user);
+    setIsCheckingLicense(true);
+    try {
+      const user = await loginWithGoogle();
+      setCurrentUser(user);
+      if (user && user.email) {
+        const existingLicense = await checkUserExistingLicense(user.email);
+        if (existingLicense) {
+          setActiveLicense(existingLicense);
+          setNeedsCodeRedemption(false);
+        } else {
+          setActiveLicense(null);
+          setNeedsCodeRedemption(true);
+        }
+      }
+    } finally {
+      setIsCheckingLicense(false);
+    }
   };
 
   const handleDirectCodeAccess = (license: CodigoDocument, user: UserProfile) => {

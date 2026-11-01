@@ -84,11 +84,15 @@ export const CodeRedemptionModal: React.FC<CodeRedemptionModalProps> = ({
         </div>
 
         {/* Título Oficial Combo */}
+        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#7c3aed]/10 text-[#7c3aed] text-[10px] font-extrabold uppercase tracking-wider mb-2">
+          <ShieldCheck className="w-3.5 h-3.5" />
+          <span>Primera vez con esta cuenta</span>
+        </div>
         <h2 className="font-heading text-xl sm:text-2xl font-black text-[#0f2147] tracking-tight mb-1">
-          Activa tu Combo: Audiolibro &amp; Libro Digital
+          Activa tu Código de Acceso
         </h2>
-        <p className="text-xs text-[#7c3aed] font-bold uppercase tracking-wider mb-5">
-          101 Buenos Malos Consejos Para Mi Hijo &bull; Edici&oacute;n Completa
+        <p className="text-xs text-slate-500 font-medium mb-5">
+          Ingresa tu código oficial de compra para registrarlo a tu nombre y desbloquear el audiolibro y libro digital.
         </p>
 
         {/* Usuario Google conectado */}

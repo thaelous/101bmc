@@ -208,32 +208,75 @@ export async function checkUserExistingLicense(userEmail: string): Promise<Codig
   if (!userEmail) return null;
   const sanitizedEmail = userEmail.toLowerCase().trim();
 
+  // 1. Comprobación rápida en caché local de licencia activa
+  try {
+    const cachedLicenseStr = localStorage.getItem('101_active_license');
+    if (cachedLicenseStr) {
+      const cached = JSON.parse(cachedLicenseStr);
+      if (cached && cached.usado_por && cached.usado_por.toLowerCase().trim() === sanitizedEmail) {
+        return cached;
+      }
+    }
+  } catch {}
+
   if (db) {
     try {
       const codigosRef = collection(db, 'codigos');
-      const q = query(codigosRef, where('usado_por', '==', sanitizedEmail));
-      const querySnapshot = await getDocs(q);
+      
+      // Consulta 1: Email saneado en minúsculas
+      let q = query(codigosRef, where('usado_por', '==', sanitizedEmail));
+      let querySnapshot = await getDocs(q);
+
+      // Consulta 2: Si el original tenía mayúsculas y no arrojó resultados
+      if (querySnapshot.empty && userEmail.trim() !== sanitizedEmail) {
+        q = query(codigosRef, where('usado_por', '==', userEmail.trim()));
+        querySnapshot = await getDocs(q);
+      }
 
       if (!querySnapshot.empty) {
         const firstDoc = querySnapshot.docs[0];
         const data = firstDoc.data();
-        return {
+        const license: CodigoDocument = {
           id: firstDoc.id,
           codigo: data.codigo || firstDoc.id,
           canjeado: data.canjeado ?? true,
-          usado_por: data.usado_por,
+          usado_por: sanitizedEmail,
           fecha_canje: data.fecha_canje ? (data.fecha_canje.toDate ? data.fecha_canje.toDate().toISOString() : data.fecha_canje) : null
         };
+        localStorage.setItem('101_active_license', JSON.stringify(license));
+        return license;
+      }
+
+      // Consulta 3 (Escaneo de seguridad): Por si el campo fue guardado con espacios o mayúsculas
+      const allDocsSnapshot = await getDocs(codigosRef);
+      for (const docSnap of allDocsSnapshot.docs) {
+        const data = docSnap.data();
+        const docEmail = typeof data.usado_por === 'string' ? data.usado_por.toLowerCase().trim() : '';
+        if (docEmail === sanitizedEmail) {
+          const license: CodigoDocument = {
+            id: docSnap.id,
+            codigo: data.codigo || docSnap.id,
+            canjeado: true,
+            usado_por: sanitizedEmail,
+            fecha_canje: data.fecha_canje ? (data.fecha_canje.toDate ? data.fecha_canje.toDate().toISOString() : data.fecha_canje) : null
+          };
+          localStorage.setItem('101_active_license', JSON.stringify(license));
+          return license;
+        }
       }
     } catch (err) {
-      console.warn('[Firestore] Consulta de licencia remota:', err);
+      console.warn('[Firestore] Consulta de reconocimiento de usuario:', err);
     }
   }
 
   // Comprobar registro local persistido
   const codes = getLocalCodes();
-  const found = codes.find(c => c.usado_por && c.usado_por.toLowerCase() === sanitizedEmail);
-  return found || null;
+  const found = codes.find(c => c.usado_por && c.usado_por.toLowerCase().trim() === sanitizedEmail);
+  if (found) {
+    localStorage.setItem('101_active_license', JSON.stringify(found));
+    return found;
+  }
+  return null;
 }
 
 /**
