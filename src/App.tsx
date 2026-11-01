@@ -67,17 +67,19 @@ export default function App() {
         if (savedLicense) {
           try {
             const license = JSON.parse(savedLicense);
-            const directUser = savedUser ? JSON.parse(savedUser) : {
-              uid: `reader-${license.codigo}`,
-              email: license.usado_por || 'lector@buenosmalosconsejos.com',
-              displayName: 'Lector Oficial',
-              photoURL: null,
-              emailVerified: true
-            };
-            setActiveLicense(license);
-            setCurrentUser(directUser);
-            setNeedsCodeRedemption(false);
-            return;
+            if (license && license.usado_por && license.usado_por.includes('@')) {
+              const directUser = savedUser ? JSON.parse(savedUser) : {
+                uid: `google-${license.usado_por}`,
+                email: license.usado_por,
+                displayName: 'Lector Oficial',
+                photoURL: null,
+                emailVerified: true
+              };
+              setActiveLicense(license);
+              setCurrentUser(directUser);
+              setNeedsCodeRedemption(false);
+              return;
+            }
           } catch {}
         }
         setActiveLicense(null);

@@ -39,51 +39,39 @@ import { getOfficialAudioTracks, OFFICIAL_113_CHAPTERS, titulosOficiales } from 
 // CONFIGURACIÓN OFICIAL DE FIREBASE (libros-1f750)
 // ============================================================================
 export const firebaseConfig = {
-  apiKey: "AIzaSyBzn-o5aK7Xb9x3ZY_k-UkXLCCgum-ZiTs",
-  authDomain: "libros-1f750.firebaseapp.com",
-  projectId: "libros-1f750",
-  storageBucket: "libros-1f750.firebasestorage.app",
-  messagingSenderId: "278349377685",
-  appId: "1:278349377685:web:34990f3b0f1f6b4bda6b9c"
+    apiKey: "AIzaSyBzn-o5aK7Xb9x3ZY_k-UkXLCCgum-ZiTs",
+    authDomain: "libros-1f750.firebaseapp.com",
+    projectId: "libros-1f750",
+    storageBucket: "libros-1f750.firebasestorage.app",
+    messagingSenderId: "278349377685",
+    appId: "1:278349377685:web:34990f3b0f1f6b4bda6b9c"
 };
 
-// Inicialización de la aplicación de Firebase
-let app: any = null;
-let auth: any = null;
-let db: any = null;
-let storage: any = null;
-let googleProvider: GoogleAuthProvider | null = null;
+// Inicialización estricta y directa de Firebase App
+export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+
+// Inicialización de servicios oficiales vinculados a la app inicializada
+export const auth = getAuth(app);
+export const db = getFirestore(app);
+export const storage = getStorage(app);
+export const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: 'select_account' });
+
+// Almacenamientos complementarios
 let altStorageFirebasestorage: any = null;
 let altStorageAppspot: any = null;
 
 try {
-  app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-  auth = getAuth(app);
-  db = getFirestore(app);
-  storage = getStorage(app);
-  googleProvider = new GoogleAuthProvider();
-  googleProvider.setCustomParameters({ prompt: 'select_account' });
-} catch (err) {
-  console.warn('[Firebase] Inicialización de instancia principal:', err);
+  altStorageFirebasestorage = getStorage(app, 'gs://libros-1f750.firebasestorage.app');
+} catch (e) {
+  // Ignorar si no está soportado
 }
 
 try {
-  if (app) {
-    altStorageFirebasestorage = getStorage(app, 'gs://libros-1f750.firebasestorage.app');
-  }
+  altStorageAppspot = getStorage(app, 'gs://libros-1f750.appspot.com');
 } catch (e) {
-  // Ignorar si no está soportado en el entorno
+  // Ignorar si no está soportado
 }
-
-try {
-  if (app) {
-    altStorageAppspot = getStorage(app, 'gs://libros-1f750.appspot.com');
-  }
-} catch (e) {
-  // Ignorar si no está soportado en el entorno
-}
-
-export { app, auth, db, storage, googleProvider };
 
 // Base de respaldo local para asegurar resiliencia en pruebas y modo offline
 const LOCAL_STORAGE_CODES_KEY = '101_consejos_codigos_pacheco';
@@ -135,47 +123,24 @@ export const saveLocalCodes = (codes: CodigoDocument[]) => {
 // ============================================================================
 
 export async function loginWithGoogle(): Promise<UserProfile> {
-  if (auth && googleProvider) {
-    try {
-      const result = await signInWithPopup(auth, googleProvider);
-      const user = result.user;
-      const profile: UserProfile = {
-        uid: user.uid,
-        email: user.email || 'usuario@buenosmalosconsejos.com',
-        displayName: user.displayName || 'Lector Oficial',
-        photoURL: user.photoURL,
-        emailVerified: user.emailVerified
-      };
-      localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(profile));
-      return profile;
-    } catch (error: any) {
-      console.warn('[Firebase Auth] Intento de login con Google:', error?.code || error?.message || error);
-      
-      // Si el dominio aún no está autorizado en Firebase Console (auth/unauthorized-domain)
-      // o el popup fue bloqueado en iframe, asegurar que el usuario continúe sin bloqueo
-      if (error?.code === 'auth/unauthorized-domain' || error?.code === 'auth/popup-blocked') {
-        const fallbackProfile: UserProfile = {
-          uid: 'google-official-user',
-          email: 'thaelous@gmail.com',
-          displayName: 'Lector Oficial',
-          photoURL: null,
-          emailVerified: true
-        };
-        localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(fallbackProfile));
-        return fallbackProfile;
-      }
-
-      throw error;
-    }
+  if (!auth || !googleProvider) {
+    throw new Error('El servicio de autenticación de Google no está disponible.');
   }
 
-  // Fallback seguro si no hay servicio de auth disponible
+  const result = await signInWithPopup(auth, googleProvider);
+  const user = result.user;
+
+  if (!user || !user.email) {
+    throw new Error('No se pudo obtener el correo de la cuenta de Google seleccionada.');
+  }
+
+  const realGoogleEmail = user.email.toLowerCase().trim();
   const profile: UserProfile = {
-    uid: 'google-official-user',
-    email: 'thaelous@gmail.com',
-    displayName: 'Lector Oficial',
-    photoURL: null,
-    emailVerified: true
+    uid: user.uid,
+    email: realGoogleEmail,
+    displayName: user.displayName || 'Lector Oficial',
+    photoURL: user.photoURL,
+    emailVerified: user.emailVerified
   };
   localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(profile));
   return profile;
@@ -272,178 +237,238 @@ export async function checkUserExistingLicense(userEmail: string): Promise<Codig
 }
 
 /**
- * Valida un código de acceso directamente en la colección 'codigos' de Firestore.
- * Puede ser invocado antes de que el usuario inicie sesión con Google o de forma directa.
+ * Verifica únicamente la disponibilidad y validez del código en Firestore
+ * SIN quemarlo ni registrar ningún correo todavía.
  */
-export async function validateDirectAccessCode(
-  inputCode: string,
-  providedEmail?: string
-): Promise<{ success: boolean; message: string; license?: CodigoDocument; user?: UserProfile }> {
+export async function checkCodeAvailability(
+  inputCode: string
+): Promise<{ valid: boolean; message: string }> {
   const sanitizedCode = inputCode.trim().toUpperCase();
-  const effectiveEmail = (providedEmail || 'lector@buenosmalosconsejos.com').trim().toLowerCase();
+  const cleanCodeNoDashes = sanitizedCode.replace(/[^A-Z0-9]/g, '');
 
   if (!sanitizedCode) {
-    return { success: false, message: 'Por favor ingresa un código de acceso válido.' };
+    return { valid: false, message: 'Por favor ingresa un código de acceso válido.' };
   }
 
   if (db) {
     try {
       const codigosRef = collection(db, 'codigos');
       
-      // 1. Buscar en Firestore por campo 'codigo'
-      let q = query(codigosRef, where('codigo', '==', sanitizedCode));
-      let querySnapshot = await getDocs(q);
+      const firestoreQueryPromise = async () => {
+        let q = query(codigosRef, where('codigo', '==', sanitizedCode));
+        let querySnapshot = await getDocs(q);
 
-      let docSnap: any = null;
-      if (!querySnapshot.empty) {
-        docSnap = querySnapshot.docs[0];
-      } else {
-        // 2. Si no se encuentra por campo, buscar si el ID del documento es el código
-        try {
-          const directDocRef = doc(db, 'codigos', sanitizedCode);
-          const directSnap = await getDoc(directDocRef);
-          if (directSnap.exists()) {
-            docSnap = directSnap;
-          }
-        } catch {
-          // Ignorar error de búsqueda por id
+        if (querySnapshot.empty && cleanCodeNoDashes !== sanitizedCode) {
+          q = query(codigosRef, where('codigo', '==', cleanCodeNoDashes));
+          querySnapshot = await getDocs(q);
         }
-      }
+
+        let docSnap: any = null;
+        if (!querySnapshot.empty) {
+          docSnap = querySnapshot.docs[0];
+        } else {
+          try {
+            const directDocRef = doc(db, 'codigos', sanitizedCode);
+            const directSnap = await getDoc(directDocRef);
+            if (directSnap.exists()) {
+              docSnap = directSnap;
+            }
+          } catch {}
+        }
+        return docSnap;
+      };
+
+      const timeoutPromise = new Promise<null>((resolve) => 
+        setTimeout(() => resolve(null), 3500)
+      );
+
+      const docSnap = await Promise.race([firestoreQueryPromise(), timeoutPromise]);
 
       if (docSnap) {
         const data = docSnap.data();
-
         if (data.canjeado === true) {
-          const owner = data.usado_por ? data.usado_por.toLowerCase() : '';
-          if (!owner || owner === effectiveEmail || effectiveEmail === 'lector@buenosmalosconsejos.com') {
-            const license: CodigoDocument = {
-              id: docSnap.id,
-              codigo: data.codigo || sanitizedCode,
-              canjeado: true,
-              usado_por: data.usado_por || effectiveEmail,
-              fecha_canje: data.fecha_canje?.toDate ? data.fecha_canje.toDate().toISOString() : (data.fecha_canje || new Date().toISOString())
-            };
-            const user: UserProfile = {
-              uid: `reader-${sanitizedCode}`,
-              email: license.usado_por || effectiveEmail,
-              displayName: 'Lector Oficial',
-              photoURL: null,
-              emailVerified: true
-            };
-            return {
-              success: true,
-              message: 'Acceso verificado para tu cuenta.',
-              license,
-              user
-            };
-          }
           return {
-            success: false,
-            message: 'Este código ya ha sido canjeado por otra cuenta.'
+            valid: false,
+            message: 'Este código ya ha sido canjeado anteriormente por otra cuenta.'
           };
         }
-
-        // Si el código no ha sido canjeado aún: Quema y registro en Firestore
-        const targetDocRef = doc(db, 'codigos', docSnap.id);
-        try {
-          await updateDoc(targetDocRef, {
-            canjeado: true,
-            usado_por: effectiveEmail,
-            fecha_canje: serverTimestamp()
-          });
-        } catch (updateErr) {
-          console.warn('[Firestore] Actualización de canje:', updateErr);
-        }
-
-        const newLicense: CodigoDocument = {
-          id: docSnap.id,
-          codigo: sanitizedCode,
-          canjeado: true,
-          usado_por: effectiveEmail,
-          fecha_canje: new Date().toISOString()
-        };
-
-        const newUser: UserProfile = {
-          uid: `reader-${sanitizedCode}`,
-          email: effectiveEmail,
-          displayName: 'Lector Oficial',
-          photoURL: null,
-          emailVerified: true
-        };
-
-        // Guardar también en almacenamiento local
-        const localCodes = getLocalCodes();
-        localCodes.push(newLicense);
-        saveLocalCodes(localCodes);
-
         return {
-          success: true,
-          message: '¡Código canjeado con éxito! Bienvenido al Audiolibro y Libro Digital.',
-          license: newLicense,
-          user: newUser
+          valid: true,
+          message: 'Código verificado con éxito. Conecta tu cuenta de Google para activarlo a tu nombre.'
         };
       }
     } catch (err: any) {
-      console.warn('[Firestore] Consulta directa en colección codigos:', err);
+      console.warn('[Firestore] Verificación de disponibilidad de código:', err);
     }
   }
 
-  // Respaldo local para pruebas y modo offline
+  // Comprobar códigos locales de respaldo
   const codes = getLocalCodes();
-  const codeIndex = codes.findIndex(c => c.codigo.toUpperCase() === sanitizedCode);
+  const found = codes.find(c => 
+    c.codigo.toUpperCase() === sanitizedCode || 
+    c.codigo.toUpperCase().replace(/[^A-Z0-9]/g, '') === cleanCodeNoDashes
+  );
+
+  if (found) {
+    if (found.canjeado) {
+      return { valid: false, message: 'Este código ya ha sido canjeado.' };
+    }
+    return { valid: true, message: 'Código verificado con éxito.' };
+  }
+
+  return {
+    valid: false,
+    message: 'El código ingresado no existe en el sistema. Verifica que esté bien escrito.'
+  };
+}
+
+/**
+ * Registra y quema estrictamente el código en Firestore asociándolo ÚNICAMENTE
+ * al correo real obtenido de la cuenta autenticada de Google.
+ * Si no hay usuario autenticado, detiene el proceso y arroja un error.
+ */
+export async function linkVerifiedCodeWithGoogleUser(
+  inputCode: string,
+  user: UserProfile
+): Promise<CodigoDocument> {
+  const sanitizedCode = inputCode.trim().toUpperCase();
+  const cleanCodeNoDashes = sanitizedCode.replace(/[^A-Z0-9]/g, '');
+
+  if (!user || !user.email || !user.email.includes('@')) {
+    throw new Error('No hay un usuario autenticado con Google. La validación se ha detenido para evitar registrar datos incorrectos.');
+  }
+
+  const realGoogleEmail = user.email.toLowerCase().trim();
+
+  if (db) {
+    const codigosRef = collection(db, 'codigos');
+    
+    let q = query(codigosRef, where('codigo', '==', sanitizedCode));
+    let querySnapshot = await getDocs(q);
+
+    if (querySnapshot.empty && cleanCodeNoDashes !== sanitizedCode) {
+      q = query(codigosRef, where('codigo', '==', cleanCodeNoDashes));
+      querySnapshot = await getDocs(q);
+    }
+
+    let targetDocSnap: any = null;
+    if (!querySnapshot.empty) {
+      targetDocSnap = querySnapshot.docs[0];
+    } else {
+      try {
+        const directDocRef = doc(db, 'codigos', sanitizedCode);
+        const directSnap = await getDoc(directDocRef);
+        if (directSnap.exists()) {
+          targetDocSnap = directSnap;
+        }
+      } catch {}
+    }
+
+    if (targetDocSnap) {
+      const data = targetDocSnap.data();
+
+      if (data.canjeado === true) {
+        if (data.usado_por && data.usado_por.toLowerCase() === realGoogleEmail) {
+          const existingLicense: CodigoDocument = {
+            id: targetDocSnap.id,
+            codigo: data.codigo || sanitizedCode,
+            canjeado: true,
+            usado_por: realGoogleEmail,
+            fecha_canje: data.fecha_canje?.toDate ? data.fecha_canje.toDate().toISOString() : data.fecha_canje
+          };
+          localStorage.setItem('101_active_license', JSON.stringify(existingLicense));
+          return existingLicense;
+        }
+        throw new Error('Este código ya ha sido canjeado por otra cuenta de Google.');
+      }
+
+      // QUEMA Y REGISTRO ESTRICTO EN FIRESTORE CON EL CORREO REAL DE GOOGLE
+      const targetDocRef = doc(db, 'codigos', targetDocSnap.id);
+      await updateDoc(targetDocRef, {
+        canjeado: true,
+        usado_por: realGoogleEmail,
+        fecha_canje: serverTimestamp()
+      });
+
+      const newLicense: CodigoDocument = {
+        id: targetDocSnap.id,
+        codigo: sanitizedCode,
+        canjeado: true,
+        usado_por: realGoogleEmail,
+        fecha_canje: new Date().toISOString()
+      };
+
+      const localCodes = getLocalCodes();
+      localCodes.push(newLicense);
+      saveLocalCodes(localCodes);
+      localStorage.setItem('101_active_license', JSON.stringify(newLicense));
+
+      return newLicense;
+    }
+  }
+
+  // Respaldo local si el código existía localmente
+  const codes = getLocalCodes();
+  const codeIndex = codes.findIndex(c => 
+    c.codigo.toUpperCase() === sanitizedCode ||
+    c.codigo.toUpperCase().replace(/[^A-Z0-9]/g, '') === cleanCodeNoDashes
+  );
 
   if (codeIndex !== -1) {
     const existing = codes[codeIndex];
+    if (existing.canjeado && existing.usado_por && existing.usado_por.toLowerCase() !== realGoogleEmail) {
+      throw new Error('Este código ya fue canjeado por otra cuenta.');
+    }
     const updatedLicense: CodigoDocument = {
       ...existing,
       canjeado: true,
-      usado_por: effectiveEmail,
+      usado_por: realGoogleEmail,
       fecha_canje: new Date().toISOString()
     };
     codes[codeIndex] = updatedLicense;
     saveLocalCodes(codes);
-    return {
-      success: true,
-      message: '¡Código verificado con éxito!',
-      license: updatedLicense,
-      user: {
-        uid: `reader-${sanitizedCode}`,
-        email: effectiveEmail,
-        displayName: 'Lector Oficial',
-        photoURL: null,
-        emailVerified: true
-      }
-    };
+    localStorage.setItem('101_active_license', JSON.stringify(updatedLicense));
+    return updatedLicense;
   }
 
-  return {
-    success: false,
-    message: 'El código ingresado no existe o no es válido. Verifica que esté bien escrito.'
-  };
+  throw new Error('El código ingresado no existe en Firestore ni pudo ser validado.');
 }
 
+/**
+ * Canje de código para usuarios ya autenticados con Google.
+ * Requiere estrictamente que userEmail provenga de la sesión de Google.
+ */
 export async function redeemAccessCode(
   inputCode: string, 
   userEmail: string
 ): Promise<{ success: boolean; message: string; license?: CodigoDocument }> {
   const sanitizedCode = inputCode.trim().toUpperCase();
-  const sanitizedEmail = userEmail.trim().toLowerCase();
+  const cleanCodeNoDashes = sanitizedCode.replace(/[^A-Z0-9]/g, '');
 
   if (!sanitizedCode) {
     return { success: false, message: 'Por favor ingresa un código de acceso válido.' };
   }
 
-  if (!sanitizedEmail) {
-    return { success: false, message: 'Inicia sesión con tu cuenta de Google primero.' };
+  // VERIFICACIÓN ESTRICTA: El correo debe ser un correo real provisto por la autenticación
+  const realGoogleEmail = userEmail ? userEmail.trim().toLowerCase() : '';
+  if (!realGoogleEmail || !realGoogleEmail.includes('@')) {
+    return {
+      success: false,
+      message: 'No hay un usuario autenticado con Google. Inicia sesión con tu cuenta de Google para canjear este código.'
+    };
   }
 
   if (db) {
     try {
       const codigosRef = collection(db, 'codigos');
       
-      // Buscar por campo 'codigo'
       let q = query(codigosRef, where('codigo', '==', sanitizedCode));
       let querySnapshot = await getDocs(q);
+
+      if (querySnapshot.empty && cleanCodeNoDashes !== sanitizedCode) {
+        q = query(codigosRef, where('codigo', '==', cleanCodeNoDashes));
+        querySnapshot = await getDocs(q);
+      }
 
       let docSnap: any = null;
       if (!querySnapshot.empty) {
@@ -462,7 +487,7 @@ export async function redeemAccessCode(
         const data = docSnap.data();
 
         if (data.canjeado === true) {
-          if (data.usado_por && data.usado_por.toLowerCase() === sanitizedEmail) {
+          if (data.usado_por && data.usado_por.toLowerCase() === realGoogleEmail) {
             return {
               success: true,
               message: 'Acceso verificado para tu cuenta.',
@@ -470,7 +495,7 @@ export async function redeemAccessCode(
                 id: docSnap.id,
                 codigo: data.codigo || sanitizedCode,
                 canjeado: true,
-                usado_por: data.usado_por,
+                usado_por: realGoogleEmail,
                 fecha_canje: data.fecha_canje?.toDate ? data.fecha_canje.toDate().toISOString() : data.fecha_canje
               }
             };
@@ -481,11 +506,11 @@ export async function redeemAccessCode(
           };
         }
 
-        // Marcar como canjeado en Firestore
+        // Marcar como canjeado en Firestore ESTRICTAMENTE con realGoogleEmail
         const docRef = doc(db, 'codigos', docSnap.id);
         await updateDoc(docRef, {
           canjeado: true,
-          usado_por: sanitizedEmail,
+          usado_por: realGoogleEmail,
           fecha_canje: serverTimestamp()
         });
 
@@ -493,14 +518,14 @@ export async function redeemAccessCode(
           id: docSnap.id,
           codigo: sanitizedCode,
           canjeado: true,
-          usado_por: sanitizedEmail,
+          usado_por: realGoogleEmail,
           fecha_canje: new Date().toISOString()
         };
 
-        // Guardar también localmente
         const localCodes = getLocalCodes();
         localCodes.push(newLicense);
         saveLocalCodes(localCodes);
+        localStorage.setItem('101_active_license', JSON.stringify(newLicense));
 
         return {
           success: true,
@@ -513,55 +538,85 @@ export async function redeemAccessCode(
     }
   }
 
-  // Respaldo local para pruebas
+  // Respaldo local si existía
   const codes = getLocalCodes();
-  const codeIndex = codes.findIndex(c => c.codigo.toUpperCase() === sanitizedCode);
+  const codeIndex = codes.findIndex(c => 
+    c.codigo.toUpperCase() === sanitizedCode || 
+    c.codigo.toUpperCase().replace(/[^A-Z0-9]/g, '') === cleanCodeNoDashes
+  );
 
-  if (codeIndex === -1) {
-    const newLicense: CodigoDocument = {
-      codigo: sanitizedCode,
+  if (codeIndex !== -1) {
+    const existing = codes[codeIndex];
+    if (existing.canjeado && existing.usado_por && existing.usado_por.toLowerCase() !== realGoogleEmail) {
+      return {
+        success: false,
+        message: 'Este código ya ha sido canjeado por otra cuenta.'
+      };
+    }
+    const updatedLicense: CodigoDocument = {
+      ...existing,
       canjeado: true,
-      usado_por: sanitizedEmail,
+      usado_por: realGoogleEmail,
       fecha_canje: new Date().toISOString()
     };
-    codes.push(newLicense);
+    codes[codeIndex] = updatedLicense;
     saveLocalCodes(codes);
+    localStorage.setItem('101_active_license', JSON.stringify(updatedLicense));
     return {
       success: true,
       message: '¡Código canjeado con éxito! Bienvenido.',
-      license: newLicense
+      license: updatedLicense
     };
   }
-
-  const existing = codes[codeIndex];
-  if (existing.canjeado) {
-    if (existing.usado_por && existing.usado_por.toLowerCase() === sanitizedEmail) {
-      return {
-        success: true,
-        message: 'Acceso verificado para tu cuenta.',
-        license: existing
-      };
-    }
-    return {
-      success: false,
-      message: 'Este código ya ha sido canjeado por otra cuenta.'
-    };
-  }
-
-  const updatedLicense: CodigoDocument = {
-    ...existing,
-    canjeado: true,
-    usado_por: sanitizedEmail,
-    fecha_canje: new Date().toISOString()
-  };
-
-  codes[codeIndex] = updatedLicense;
-  saveLocalCodes(codes);
 
   return {
-    success: true,
-    message: '¡Código canjeado con éxito! Bienvenido.',
-    license: updatedLicense
+    success: false,
+    message: 'El código ingresado no existe o no es válido.'
+  };
+}
+
+/**
+ * Valida un código directamente requiriendo obligatoriamente un correo de Google autenticado.
+ * Si no se proporciona, detiene el proceso e informa al usuario.
+ */
+export async function validateDirectAccessCode(
+  inputCode: string,
+  userEmail?: string
+): Promise<{ success: boolean; message: string; license?: CodigoDocument; user?: UserProfile }> {
+  const sanitizedCode = inputCode.trim().toUpperCase();
+  const realGoogleEmail = userEmail ? userEmail.trim().toLowerCase() : '';
+
+  if (!sanitizedCode) {
+    return { success: false, message: 'Por favor ingresa un código de acceso válido.' };
+  }
+
+  if (!realGoogleEmail || !realGoogleEmail.includes('@')) {
+    return {
+      success: false,
+      message: 'Debes iniciar sesión con tu cuenta de Google para canjear este código y vincularlo a tu correo.'
+    };
+  }
+
+  const result = await redeemAccessCode(sanitizedCode, realGoogleEmail);
+  if (result.success && result.license) {
+    const userProfile: UserProfile = {
+      uid: `google-${realGoogleEmail}`,
+      email: realGoogleEmail,
+      displayName: 'Lector Oficial',
+      photoURL: null,
+      emailVerified: true
+    };
+    return {
+      success: true,
+      message: result.message,
+      license: result.license,
+      user: userProfile
+    };
+  }
+
+  return {
+    success: false,
+    message: result.message || 'Código no válido.'
   };
 }
 
