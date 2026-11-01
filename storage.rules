@@ -7,18 +7,18 @@ service firebase.storage {
     
     // 1. Libro Digital en la raíz del Storage (101BMC.pdf)
     match /101BMC.pdf {
-      allow read: if request.auth != null;
+      allow read: if true;
       allow write: if false; // Solo administración/consola
     }
 
     match /101bmc.pdf {
-      allow read: if request.auth != null;
+      allow read: if true;
       allow write: if false;
     }
 
     // 2. Carpeta con los 113 capítulos del audiolibro (101bmc[NUMERO]of113.mp3)
     match /audiolibro/{filename} {
-      allow read: if request.auth != null;
+      allow read: if true;
       allow write: if false; // Solo administración/consola
     }
 

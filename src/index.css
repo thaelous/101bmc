@@ -83,3 +83,46 @@ input[type="range"]::-webkit-slider-thumb:hover {
     visibility: hidden !important;
   }
 }
+
+/* Efecto de paso de página / ojear libro digital */
+@keyframes pageFlipNext {
+  0% {
+    transform: perspective(1400px) rotateY(0deg);
+    opacity: 0.95;
+  }
+  45% {
+    transform: perspective(1400px) rotateY(-18deg) scale(0.97);
+    box-shadow: -20px 10px 40px rgba(15, 33, 71, 0.3);
+    opacity: 0.85;
+  }
+  100% {
+    transform: perspective(1400px) rotateY(0deg) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes pageFlipPrev {
+  0% {
+    transform: perspective(1400px) rotateY(0deg);
+    opacity: 0.95;
+  }
+  45% {
+    transform: perspective(1400px) rotateY(18deg) scale(0.97);
+    box-shadow: 20px 10px 40px rgba(15, 33, 71, 0.3);
+    opacity: 0.85;
+  }
+  100% {
+    transform: perspective(1400px) rotateY(0deg) scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-page-flip-next {
+  animation: pageFlipNext 0.38s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  transform-origin: left center;
+}
+
+.animate-page-flip-prev {
+  animation: pageFlipPrev 0.38s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  transform-origin: right center;
+}

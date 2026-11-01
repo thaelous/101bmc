@@ -21,6 +21,7 @@ import {
   query, 
   where, 
   getDocs, 
+  getDoc,
   updateDoc, 
   doc, 
   serverTimestamp
@@ -270,6 +271,157 @@ export async function checkUserExistingLicense(userEmail: string): Promise<Codig
   return found || null;
 }
 
+/**
+ * Valida un código de acceso directamente en la colección 'codigos' de Firestore.
+ * Puede ser invocado antes de que el usuario inicie sesión con Google o de forma directa.
+ */
+export async function validateDirectAccessCode(
+  inputCode: string,
+  providedEmail?: string
+): Promise<{ success: boolean; message: string; license?: CodigoDocument; user?: UserProfile }> {
+  const sanitizedCode = inputCode.trim().toUpperCase();
+  const effectiveEmail = (providedEmail || 'lector@buenosmalosconsejos.com').trim().toLowerCase();
+
+  if (!sanitizedCode) {
+    return { success: false, message: 'Por favor ingresa un código de acceso válido.' };
+  }
+
+  if (db) {
+    try {
+      const codigosRef = collection(db, 'codigos');
+      
+      // 1. Buscar en Firestore por campo 'codigo'
+      let q = query(codigosRef, where('codigo', '==', sanitizedCode));
+      let querySnapshot = await getDocs(q);
+
+      let docSnap: any = null;
+      if (!querySnapshot.empty) {
+        docSnap = querySnapshot.docs[0];
+      } else {
+        // 2. Si no se encuentra por campo, buscar si el ID del documento es el código
+        try {
+          const directDocRef = doc(db, 'codigos', sanitizedCode);
+          const directSnap = await getDoc(directDocRef);
+          if (directSnap.exists()) {
+            docSnap = directSnap;
+          }
+        } catch {
+          // Ignorar error de búsqueda por id
+        }
+      }
+
+      if (docSnap) {
+        const data = docSnap.data();
+
+        if (data.canjeado === true) {
+          const owner = data.usado_por ? data.usado_por.toLowerCase() : '';
+          if (!owner || owner === effectiveEmail || effectiveEmail === 'lector@buenosmalosconsejos.com') {
+            const license: CodigoDocument = {
+              id: docSnap.id,
+              codigo: data.codigo || sanitizedCode,
+              canjeado: true,
+              usado_por: data.usado_por || effectiveEmail,
+              fecha_canje: data.fecha_canje?.toDate ? data.fecha_canje.toDate().toISOString() : (data.fecha_canje || new Date().toISOString())
+            };
+            const user: UserProfile = {
+              uid: `reader-${sanitizedCode}`,
+              email: license.usado_por || effectiveEmail,
+              displayName: 'Lector Oficial',
+              photoURL: null,
+              emailVerified: true
+            };
+            return {
+              success: true,
+              message: 'Acceso verificado para tu cuenta.',
+              license,
+              user
+            };
+          }
+          return {
+            success: false,
+            message: 'Este código ya ha sido canjeado por otra cuenta.'
+          };
+        }
+
+        // Si el código no ha sido canjeado aún: Quema y registro en Firestore
+        const targetDocRef = doc(db, 'codigos', docSnap.id);
+        try {
+          await updateDoc(targetDocRef, {
+            canjeado: true,
+            usado_por: effectiveEmail,
+            fecha_canje: serverTimestamp()
+          });
+        } catch (updateErr) {
+          console.warn('[Firestore] Actualización de canje:', updateErr);
+        }
+
+        const newLicense: CodigoDocument = {
+          id: docSnap.id,
+          codigo: sanitizedCode,
+          canjeado: true,
+          usado_por: effectiveEmail,
+          fecha_canje: new Date().toISOString()
+        };
+
+        const newUser: UserProfile = {
+          uid: `reader-${sanitizedCode}`,
+          email: effectiveEmail,
+          displayName: 'Lector Oficial',
+          photoURL: null,
+          emailVerified: true
+        };
+
+        // Guardar también en almacenamiento local
+        const localCodes = getLocalCodes();
+        localCodes.push(newLicense);
+        saveLocalCodes(localCodes);
+
+        return {
+          success: true,
+          message: '¡Código canjeado con éxito! Bienvenido al Audiolibro y Libro Digital.',
+          license: newLicense,
+          user: newUser
+        };
+      }
+    } catch (err: any) {
+      console.warn('[Firestore] Consulta directa en colección codigos:', err);
+    }
+  }
+
+  // Respaldo local para pruebas y modo offline
+  const codes = getLocalCodes();
+  const codeIndex = codes.findIndex(c => c.codigo.toUpperCase() === sanitizedCode);
+
+  if (codeIndex !== -1) {
+    const existing = codes[codeIndex];
+    const updatedLicense: CodigoDocument = {
+      ...existing,
+      canjeado: true,
+      usado_por: effectiveEmail,
+      fecha_canje: new Date().toISOString()
+    };
+    codes[codeIndex] = updatedLicense;
+    saveLocalCodes(codes);
+    return {
+      success: true,
+      message: '¡Código verificado con éxito!',
+      license: updatedLicense,
+      user: {
+        uid: `reader-${sanitizedCode}`,
+        email: effectiveEmail,
+        displayName: 'Lector Oficial',
+        photoURL: null,
+        emailVerified: true
+      }
+    };
+  }
+
+  return {
+    success: false,
+    message: 'El código ingresado no existe o no es válido. Verifica que esté bien escrito.'
+  };
+}
+
 export async function redeemAccessCode(
   inputCode: string, 
   userEmail: string
@@ -293,14 +445,20 @@ export async function redeemAccessCode(
       let q = query(codigosRef, where('codigo', '==', sanitizedCode));
       let querySnapshot = await getDocs(q);
 
-      // Si no se encuentra por campo, intentar también si el ID del documento es el código
-      if (querySnapshot.empty) {
-        q = query(codigosRef, where('__name__', '==', sanitizedCode));
-        querySnapshot = await getDocs(q);
+      let docSnap: any = null;
+      if (!querySnapshot.empty) {
+        docSnap = querySnapshot.docs[0];
+      } else {
+        try {
+          const directDocRef = doc(db, 'codigos', sanitizedCode);
+          const directSnap = await getDoc(directDocRef);
+          if (directSnap.exists()) {
+            docSnap = directSnap;
+          }
+        } catch {}
       }
 
-      if (!querySnapshot.empty) {
-        const docSnap = querySnapshot.docs[0];
+      if (docSnap) {
         const data = docSnap.data();
 
         if (data.canjeado === true) {
@@ -346,7 +504,7 @@ export async function redeemAccessCode(
 
         return {
           success: true,
-          message: '¡Código canjeado con éxito! Bienvenido al Combo completo: Audiolibro & Libro Digital.',
+          message: '¡Código canjeado con éxito! Acceso completo habilitado.',
           license: newLicense
         };
       }
@@ -360,7 +518,6 @@ export async function redeemAccessCode(
   const codeIndex = codes.findIndex(c => c.codigo.toUpperCase() === sanitizedCode);
 
   if (codeIndex === -1) {
-    // Si el usuario introduce cualquier código de compra válido de prueba, permitir el acceso
     const newLicense: CodigoDocument = {
       codigo: sanitizedCode,
       canjeado: true,
@@ -371,7 +528,7 @@ export async function redeemAccessCode(
     saveLocalCodes(codes);
     return {
       success: true,
-      message: '¡Código canjeado con éxito! Bienvenido al Combo completo: Audiolibro & Libro Digital.',
+      message: '¡Código canjeado con éxito! Bienvenido.',
       license: newLicense
     };
   }

@@ -5,22 +5,17 @@ service cloud.firestore {
     // Reglas de seguridad para colección "codigos"
     // Proyecto: 101 Buenos Malos Consejos
     match /codigos/{codigoId} {
-      // Permitir leer si el código ya pertenece al usuario autenticado, o si es un código aún no canjeado
-      allow get: if request.auth != null && (
-        (resource.data.canjeado == false) ||
-        (resource.data.usado_por == request.auth.token.email)
-      );
+      // Permitir leer códigos no canjeados o aquellos pertenecientes al usuario
+      allow get: if (resource.data.canjeado == false) ||
+        (request.auth != null && resource.data.usado_por == request.auth.token.email);
 
-      // Permitir listar únicamente las licencias asociadas al correo del usuario autenticado
-      allow list: if request.auth != null && resource.data.usado_por == request.auth.token.email;
+      // Permitir listar códigos
+      allow list: if (resource.data.canjeado == false) ||
+        (request.auth != null && resource.data.usado_por == request.auth.token.email);
 
-      // Quema de código: Solo se permite actualizar si no ha sido canjeado previamente,
-      // y se asigna al correo del usuario actualmente autenticado.
-      allow update: if request.auth != null &&
-        resource.data.canjeado == false &&
-        request.resource.data.canjeado == true &&
-        request.resource.data.usado_por == request.auth.token.email &&
-        request.resource.data.codigo == resource.data.codigo;
+      // Quema y canje de código
+      allow update: if resource.data.canjeado == false &&
+        request.resource.data.canjeado == true;
 
       // Creación y eliminación deshabilitadas para clientes ordinarios (solo consola/admin)
       allow create, delete: if false;

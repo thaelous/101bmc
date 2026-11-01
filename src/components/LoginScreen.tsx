@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import confetti from 'canvas-confetti';
 import { 
   Download, 
   ArrowRight, 
@@ -6,19 +7,70 @@ import {
   BookOpen, 
   ShieldCheck, 
   Share2,
-  X
+  X,
+  Key,
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
 import { usePWAInstall } from '../hooks/usePWAInstall';
+import { CodigoDocument, UserProfile } from '../types';
+import { validateDirectAccessCode } from '../firebase/config';
 
 interface LoginScreenProps {
   onLogin: () => Promise<void>;
+  onDirectCodeAccess?: (license: CodigoDocument, user: UserProfile) => void;
 }
 
-export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
+export const LoginScreen: React.FC<LoginScreenProps> = ({ 
+  onLogin,
+  onDirectCodeAccess 
+}) => {
+  const [accessCode, setAccessCode] = useState('');
+  const [isCheckingCode, setIsCheckingCode] = useState(false);
+  const [directCodeError, setDirectCodeError] = useState<string | null>(null);
+  const [directCodeSuccess, setDirectCodeSuccess] = useState(false);
+
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
   const [showIOSModal, setShowIOSModal] = useState(false);
+
+  const handleCodeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = accessCode.trim().toUpperCase();
+    if (!trimmed) {
+      setDirectCodeError('Por favor ingresa tu código de acceso.');
+      return;
+    }
+
+    setIsCheckingCode(true);
+    setDirectCodeError(null);
+    setDirectCodeSuccess(false);
+
+    try {
+      const result = await validateDirectAccessCode(trimmed);
+      if (result.success && result.license && result.user) {
+        setDirectCodeSuccess(true);
+        confetti({
+          particleCount: 100,
+          spread: 70,
+          origin: { y: 0.6 },
+          colors: ['#7c3aed', '#4f96fe', '#f97316', '#ffffff']
+        });
+        setTimeout(() => {
+          if (onDirectCodeAccess) {
+            onDirectCodeAccess(result.license!, result.user!);
+          }
+        }, 800);
+      } else {
+        setDirectCodeError(result.message || 'Código no válido.');
+      }
+    } catch (err: any) {
+      setDirectCodeError(err.message || 'Error al conectar con Firestore.');
+    } finally {
+      setIsCheckingCode(false);
+    }
+  };
 
   const handleGoogleSignIn = async () => {
     setIsLoggingIn(true);
@@ -152,28 +204,102 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
             <div className="absolute top-0 right-0 w-36 h-36 bg-[#7c3aed]/10 rounded-full blur-2xl pointer-events-none" />
 
             {/* Arte del Personaje con logo.png */}
-            <div className="mx-auto mb-5 flex justify-center">
+            <div className="mx-auto mb-4 flex justify-center">
               <div className="relative p-1.5 rounded-full bg-gradient-to-tr from-[#7c3aed] to-[#4f96fe] shadow-xl">
                 <img
                   src="/logo.png"
                   alt="101 Buenos Malos Consejos Para Mi Hijo"
-                  className="w-32 h-32 sm:w-36 sm:h-36 rounded-full object-cover border-2 border-white shadow-inner"
+                  className="w-24 h-24 sm:w-28 sm:h-28 rounded-full object-cover border-2 border-white shadow-inner"
                 />
               </div>
             </div>
 
-            <h2 className="font-heading text-2xl font-black text-[#0f2147] mb-2">
-              Acceso al Combo Oficial
+            <h2 className="font-heading text-xl sm:text-2xl font-black text-[#0f2147] mb-1">
+              Desbloquear Audiolibro y Libro
             </h2>
-            <p className="text-xs sm:text-sm text-slate-500 leading-relaxed mb-7">
-              Inicia sesión con tu cuenta de Google para acceder a tu Combo: Audiolibro &amp; Libro Digital o activar tu código de compra.
+            <p className="text-xs text-slate-500 leading-relaxed mb-5">
+              Ingresa tu código de compra para activar tu acceso completo o inicia sesión con Google.
             </p>
 
-            {/* Botón "Continuar con Google" limpio */}
+            {/* FORMULARIO PRINCIPAL: CÓDIGO DE ACCESO FIRESTORE */}
+            <form onSubmit={handleCodeSubmit} className="space-y-3 mb-5 text-left">
+              <div>
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-[#0f2147] mb-1.5">
+                  Ingresa tu código de acceso
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={accessCode}
+                    onChange={(e) => {
+                      setAccessCode(e.target.value.toUpperCase());
+                      setDirectCodeError(null);
+                    }}
+                    placeholder="EJ: CONSEJO-101-GOLD"
+                    disabled={isCheckingCode}
+                    className="w-full px-4 py-3 rounded-xl bg-slate-50 border-2 border-slate-200 focus:border-[#7c3aed] focus:bg-white focus:outline-none text-center font-mono font-bold text-sm tracking-wider uppercase text-[#0f2147] placeholder:text-slate-400 transition"
+                  />
+                  {accessCode && (
+                    <button
+                      type="button"
+                      onClick={() => setAccessCode('')}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {directCodeError && (
+                <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-medium flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                  <span>{directCodeError}</span>
+                </div>
+              )}
+
+              {directCodeSuccess && (
+                <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                  <span>¡Código verificado en Firestore! Accediendo...</span>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={isCheckingCode || !accessCode.trim()}
+                className="w-full py-3.5 px-5 rounded-xl bg-[#7c3aed] hover:bg-[#6d28d9] text-white font-black text-xs sm:text-sm tracking-wide shadow-lg shadow-[#7c3aed]/30 flex items-center justify-center gap-2 transition-all duration-200 active:scale-[0.99] disabled:opacity-50 disabled:pointer-events-none"
+              >
+                {isCheckingCode ? (
+                  <span className="flex items-center gap-2">
+                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Validando en Firestore...</span>
+                  </span>
+                ) : (
+                  <>
+                    <Key className="w-4 h-4" />
+                    <span>Desbloquear con mi Código</span>
+                    <ArrowRight className="w-4 h-4 ml-auto" />
+                  </>
+                )}
+              </button>
+            </form>
+
+            {/* SEPARADOR ELEGANTE */}
+            <div className="relative my-4">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-slate-200" />
+              </div>
+              <div className="relative flex justify-center text-[10px] uppercase font-bold tracking-wider">
+                <span className="bg-white/95 px-3 text-slate-400">O inicia sesión vinculada</span>
+              </div>
+            </div>
+
+            {/* Botón "Continuar con Google" */}
             <button
               onClick={handleGoogleSignIn}
               disabled={isLoggingIn}
-              className="w-full py-4 px-6 rounded-2xl bg-white hover:bg-slate-50 text-[#0f2147] font-black text-sm shadow-lg border border-slate-200/80 flex items-center justify-center gap-3 transition-all duration-200 active:scale-[0.99] disabled:opacity-50 disabled:pointer-events-none group"
+              className="w-full py-3 px-5 rounded-xl bg-white hover:bg-slate-50 text-[#0f2147] font-extrabold text-xs shadow-md border border-slate-200 flex items-center justify-center gap-3 transition-all duration-200 active:scale-[0.99] disabled:opacity-50 disabled:pointer-events-none group"
             >
               {isLoggingIn ? (
                 <span className="flex items-center gap-2">
@@ -182,7 +308,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                 </span>
               ) : (
                 <>
-                  <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24">
+                  <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24">
                     <path
                       fill="#4285F4"
                       d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -201,20 +327,20 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                     />
                   </svg>
                   <span>Continuar con Google</span>
-                  <ArrowRight className="w-4 h-4 text-[#7c3aed] group-hover:translate-x-1 transition-transform ml-auto" />
+                  <ArrowRight className="w-3.5 h-3.5 text-[#7c3aed] group-hover:translate-x-1 transition-transform ml-auto" />
                 </>
               )}
             </button>
 
             {loginError && (
-              <p className="mt-4 text-xs text-red-600 bg-red-50 p-3 rounded-xl border border-red-200 text-left font-medium">
+              <p className="mt-3 text-xs text-red-600 bg-red-50 p-2.5 rounded-xl border border-red-200 text-left font-medium">
                 {loginError}
               </p>
             )}
 
-            <div className="mt-6 pt-5 border-t border-slate-100 flex items-center justify-center gap-2 text-xs text-slate-500 font-semibold">
-              <ShieldCheck className="w-4 h-4 text-emerald-600" />
-              <span>Acceso seguro protegido contra descargas</span>
+            <div className="mt-4 pt-3.5 border-t border-slate-100 flex items-center justify-center gap-1.5 text-[11px] text-slate-500 font-semibold">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Protegido contra descargas e impresiones</span>
             </div>
 
           </div>

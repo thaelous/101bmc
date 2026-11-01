@@ -62,6 +62,24 @@ export default function App() {
           setIsCheckingLicense(false);
         }
       } else {
+        const savedLicense = localStorage.getItem('101_active_license');
+        const savedUser = localStorage.getItem('101_direct_user');
+        if (savedLicense) {
+          try {
+            const license = JSON.parse(savedLicense);
+            const directUser = savedUser ? JSON.parse(savedUser) : {
+              uid: `reader-${license.codigo}`,
+              email: license.usado_por || 'lector@buenosmalosconsejos.com',
+              displayName: 'Lector Oficial',
+              photoURL: null,
+              emailVerified: true
+            };
+            setActiveLicense(license);
+            setCurrentUser(directUser);
+            setNeedsCodeRedemption(false);
+            return;
+          } catch {}
+        }
         setActiveLicense(null);
         setNeedsCodeRedemption(false);
       }
@@ -77,14 +95,25 @@ export default function App() {
     setCurrentUser(user);
   };
 
+  const handleDirectCodeAccess = (license: CodigoDocument, user: UserProfile) => {
+    localStorage.setItem('101_active_license', JSON.stringify(license));
+    localStorage.setItem('101_direct_user', JSON.stringify(user));
+    setActiveLicense(license);
+    setCurrentUser(user);
+    setNeedsCodeRedemption(false);
+  };
+
   const handleLogout = async () => {
     await logoutUser();
+    localStorage.removeItem('101_active_license');
+    localStorage.removeItem('101_direct_user');
     setCurrentUser(null);
     setActiveLicense(null);
     setNeedsCodeRedemption(false);
   };
 
   const handleCodeRedeemed = (license: CodigoDocument) => {
+    localStorage.setItem('101_active_license', JSON.stringify(license));
     setActiveLicense(license);
     setNeedsCodeRedemption(false);
   };
@@ -97,17 +126,17 @@ export default function App() {
           <img src="/logo.png" alt="Logo" className="w-full h-full rounded-full object-cover" />
         </div>
         <p className="font-heading text-white text-xs font-black tracking-widest uppercase mt-4 drop-shadow-sm">
-          Cargando combo: audiolibro &amp; libro digital...
+          Cargando contenido oficial...
         </p>
       </div>
     );
   }
 
-  // 1. Pantalla Inicial: Si no ha iniciado sesión con Google -> Mostrar LoginScreen
+  // 1. Pantalla Inicial: Si no tiene acceso activo -> Mostrar LoginScreen
   if (!currentUser) {
     return (
       <>
-        <LoginScreen onLogin={handleLogin} />
+        <LoginScreen onLogin={handleLogin} onDirectCodeAccess={handleDirectCodeAccess} />
         <OfflineIndicator />
       </>
     );
