@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Maximize2, 
   Minimize2, 
@@ -7,13 +7,13 @@ import {
   Loader2, 
   BookOpen, 
   CheckCircle2, 
-  RefreshCw,
-  ChevronLeft,
-  ChevronRight,
-  ZoomIn,
-  ZoomOut,
-  Layers,
-  BookMarked
+  RefreshCw, 
+  ChevronLeft, 
+  ChevronRight, 
+  ZoomIn, 
+  ZoomOut, 
+  Layers, 
+  BookMarked 
 } from 'lucide-react';
 import { getDigitalBookPdfUrl } from '../firebase/config';
 
@@ -28,6 +28,151 @@ declare global {
   }
 }
 
+/**
+ * Componente de página individual para el Modo Continuo.
+ * Utiliza IntersectionObserver para renderizar el lienzo <canvas> mediante PDF.js
+ * de manera suave y diferida a medida que el usuario hace scroll vertical.
+ */
+interface ContinuousPageItemProps {
+  pdfDoc: any;
+  pageNum: number;
+  zoomScale: number;
+  containerWidth: number;
+  onPageVisible?: (pageNum: number) => void;
+}
+
+const ContinuousPageItem: React.FC<ContinuousPageItemProps> = ({
+  pdfDoc,
+  pageNum,
+  zoomScale,
+  containerWidth,
+  onPageVisible
+}) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const [isRendered, setIsRendered] = useState(false);
+  const [isRendering, setIsRendering] = useState(false);
+  const [aspectRatio, setAspectRatio] = useState(1.414);
+  const renderTaskRef = useRef<any>(null);
+
+  const renderPage = useCallback(async () => {
+    if (!pdfDoc || !canvasRef.current) return;
+    setIsRendering(true);
+
+    try {
+      if (renderTaskRef.current) {
+        try {
+          renderTaskRef.current.cancel();
+        } catch {
+          // Ignorar cancelación previa
+        }
+      }
+
+      const page = await pdfDoc.getPage(pageNum);
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const baseViewport = page.getViewport({ scale: 1.0 });
+      const currentRatio = baseViewport.height / baseViewport.width;
+      setAspectRatio(currentRatio);
+
+      // Calcular ancho disponible respetando el zoom del usuario
+      const targetWidth = Math.min(containerWidth - 24, 850);
+      const calculatedScale = Math.min(2.5, Math.max(0.55, (targetWidth / baseViewport.width) * zoomScale));
+      const viewport = page.getViewport({ scale: calculatedScale });
+
+      // Escala de píxeles nítida en pantallas Retina y móviles
+      const dpr = Math.min(window.devicePixelRatio || 1, 2.0);
+      canvas.width = Math.floor(viewport.width * dpr);
+      canvas.height = Math.floor(viewport.height * dpr);
+      canvas.style.width = `${Math.floor(viewport.width)}px`;
+      canvas.style.height = `${Math.floor(viewport.height)}px`;
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      const renderContext = {
+        canvasContext: ctx,
+        viewport
+      };
+
+      const renderTask = page.render(renderContext);
+      renderTaskRef.current = renderTask;
+      await renderTask.promise;
+      setIsRendered(true);
+    } catch (err: any) {
+      if (err?.name !== 'RenderingCancelledException') {
+        console.warn(`[Lector Continuo] Error renderizado pág ${pageNum}:`, err);
+      }
+    } finally {
+      setIsRendering(false);
+    }
+  }, [pdfDoc, pageNum, zoomScale, containerWidth]);
+
+  useEffect(() => {
+    let observer: IntersectionObserver | null = null;
+    const el = wrapperRef.current;
+
+    if (el) {
+      observer = new IntersectionObserver((entries) => {
+        const entry = entries[0];
+        if (entry.isIntersecting) {
+          if (!isRendered) {
+            renderPage();
+          }
+          if (entry.intersectionRatio > 0.45 && onPageVisible) {
+            onPageVisible(pageNum);
+          }
+        }
+      }, {
+        rootMargin: '500px 0px',
+        threshold: [0, 0.5, 1.0]
+      });
+
+      observer.observe(el);
+    }
+
+    return () => {
+      if (observer && el) observer.unobserve(el);
+    };
+  }, [pdfDoc, pageNum, renderPage, isRendered, onPageVisible]);
+
+  useEffect(() => {
+    if (isRendered) {
+      renderPage();
+    }
+  }, [zoomScale, containerWidth, renderPage]);
+
+  return (
+    <div 
+      ref={wrapperRef}
+      id={`continuous-page-${pageNum}`}
+      className="relative mx-auto my-4 bg-white shadow-xl rounded-xl sm:rounded-2xl overflow-hidden border border-slate-200/80 transition-all select-none"
+      style={{
+        maxWidth: `${Math.min(containerWidth - 24, 850)}px`,
+        minHeight: `${Math.round(Math.min(containerWidth - 24, 850) * aspectRatio)}px`
+      }}
+    >
+      <canvas ref={canvasRef} className="block mx-auto max-w-full h-auto select-none pointer-events-none" />
+
+      {/* Indicador de carga si aún no se ha renderizado */}
+      {!isRendered && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-50 text-slate-400">
+          <Loader2 className="w-6 h-6 animate-spin text-[#7c3aed] mb-2" />
+          <span className="text-xs font-semibold">Cargando página {pageNum}...</span>
+        </div>
+      )}
+
+      {/* Número de página discreto */}
+      <div className="absolute bottom-2 right-3 text-[10px] font-mono font-bold text-slate-400 bg-white/90 border border-slate-200/80 px-2 py-0.5 rounded shadow-2xs">
+        {pageNum}
+      </div>
+    </div>
+  );
+};
+
 export const BookReader: React.FC<BookReaderProps> = ({
   userEmail,
   isSideBySide = false
@@ -37,14 +182,17 @@ export const BookReader: React.FC<BookReaderProps> = ({
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // Modo de visualización: 'interactive' (Canvas con paso de página) vs 'continuous' (Iframe sin barras)
+  // Modos de visualización: 'interactive' (Ojear página por página) vs 'continuous' (Scroll vertical continuo)
   const [displayMode, setDisplayMode] = useState<'interactive' | 'continuous'>('interactive');
-  const [useWebEngine, setUseWebEngine] = useState(false);
 
-  // Estados del visor interactivo Canvas
+  // Estados del documento cargado mediante Mozilla PDF.js
   const [pdfDoc, setPdfDoc] = useState<any>(null);
-  
-  // Última posición de lectura (número de página) guardada automáticamente en localStorage
+  const [totalPages, setTotalPages] = useState<number>(1);
+  const [isRenderingPage, setIsRenderingPage] = useState(false);
+  const [zoomScale, setZoomScale] = useState(1.0);
+  const [pageFlipClass, setPageFlipClass] = useState<string>('');
+
+  // Última posición de lectura guardada automáticamente en localStorage
   const [currentPage, setCurrentPage] = useState<number>(() => {
     try {
       const saved = localStorage.getItem('bmc_ultima_pagina_lectura');
@@ -56,10 +204,24 @@ export const BookReader: React.FC<BookReaderProps> = ({
     return 1;
   });
 
-  const [totalPages, setTotalPages] = useState(1);
-  const [isRenderingPage, setIsRenderingPage] = useState(false);
-  const [zoomScale, setZoomScale] = useState(1.0);
-  const [pageFlipClass, setPageFlipClass] = useState<string>('');
+  const containerRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const continuousContainerRef = useRef<HTMLDivElement>(null);
+  const touchStartXRef = useRef<number | null>(null);
+  const renderTaskRef = useRef<any>(null);
+  const [containerWidth, setContainerWidth] = useState(800);
+
+  // Actualizar ancho del contenedor para respuesta fluida
+  useEffect(() => {
+    const updateWidth = () => {
+      if (containerRef.current) {
+        setContainerWidth(containerRef.current.clientWidth);
+      }
+    };
+    updateWidth();
+    window.addEventListener('resize', updateWidth);
+    return () => window.removeEventListener('resize', updateWidth);
+  }, []);
 
   // Guardar automáticamente la posición de lectura en localStorage
   useEffect(() => {
@@ -72,12 +234,7 @@ export const BookReader: React.FC<BookReaderProps> = ({
     }
   }, [currentPage]);
 
-  const containerRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const touchStartXRef = useRef<number | null>(null);
-  const renderTaskRef = useRef<any>(null);
-
-  // Cargar URL del libro digital desde Firebase Storage
+  // Cargar URL del archivo 101BMC.pdf desde Firebase Storage
   const loadPdf = async () => {
     setIsLoadingPdf(true);
     setPdfError(null);
@@ -87,7 +244,7 @@ export const BookReader: React.FC<BookReaderProps> = ({
       if (result.url) {
         setPdfUrl(result.url);
       } else {
-        setPdfError('No se pudo encontrar el libro digital en el servidor.');
+        setPdfError('No se pudo encontrar el libro digital en el servidor oficial.');
       }
     } catch {
       setPdfError('Error de conexión al cargar el libro digital. Por favor, reintenta.');
@@ -100,35 +257,58 @@ export const BookReader: React.FC<BookReaderProps> = ({
     loadPdf();
   }, []);
 
-  // Inicializar PDF.js cuando pdfUrl esté disponible
+  // Inicializar Mozilla PDF.js oficial e instanciar el documento con ArrayBuffer
   useEffect(() => {
     if (!pdfUrl) return;
 
     let isCancelled = false;
 
     const initPdfJs = async () => {
-      if (!window.pdfjsLib) {
-        // Si la librería CDN aún está cargando, esperar brevemente
-        let retries = 0;
-        while (!window.pdfjsLib && retries < 15) {
-          await new Promise(r => setTimeout(r, 200));
-          retries++;
-        }
-      }
-
-      if (!window.pdfjsLib) {
-        // Fallback al visor iframe si pdfjsLib no está disponible en el entorno
-        setDisplayMode('continuous');
-        return;
-      }
+      setIsLoadingPdf(true);
+      setPdfError(null);
 
       try {
+        // 1. Asegurar que pdfjsLib esté disponible en window
+        if (!window.pdfjsLib) {
+          await new Promise<void>((resolve, reject) => {
+            let retries = 0;
+            const interval = setInterval(() => {
+              if (window.pdfjsLib) {
+                clearInterval(interval);
+                resolve();
+              } else if (retries > 25) {
+                clearInterval(interval);
+                // Inyectar dinámicamente si tardó el CDN
+                const script = document.createElement('script');
+                script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+                script.onload = () => resolve();
+                script.onerror = () => reject(new Error('No se pudo cargar la librería PDF.js'));
+                document.head.appendChild(script);
+              }
+              retries++;
+            }, 150);
+          });
+        }
+
+        // 2. Configurar el worker oficial de Mozilla PDF.js
         window.pdfjsLib.GlobalWorkerOptions.workerSrc = 
           'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
+        // 3. Descargar el archivo 101BMC.pdf en memoria como ArrayBuffer
+        // Esto evita bloqueos de CORS del worker o errores de Google Docs
+        const response = await fetch(pdfUrl);
+        if (!response.ok) {
+          throw new Error(`Error HTTP ${response.status} al descargar el libro`);
+        }
+        const arrayBuffer = await response.arrayBuffer();
+
+        if (isCancelled) return;
+
+        // 4. Instanciar el documento directamente con el ArrayBuffer
         const loadingTask = window.pdfjsLib.getDocument({
-          url: pdfUrl,
-          withCredentials: false
+          data: arrayBuffer,
+          cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
+          cMapPacked: true
         });
 
         const doc = await loadingTask.promise;
@@ -136,14 +316,16 @@ export const BookReader: React.FC<BookReaderProps> = ({
           setPdfDoc(doc);
           const max = doc.numPages || 1;
           setTotalPages(max);
-          // Si la página guardada en localStorage supera el total de páginas, ajustarla
+
+          // Asegurar que la página guardada esté acotada
           setCurrentPage(prev => (prev > max ? max : prev < 1 ? 1 : prev));
+          setIsLoadingPdf(false);
         }
       } catch (err: any) {
-        console.info('[Lector] Motor interactivo usando visor adaptado continuo:', err?.message || err);
+        console.error('[BookReader] Error al inicializar PDF.js:', err);
         if (!isCancelled) {
-          // Si PDF.js no puede hacer fetch directo por políticas del navegador, activar modo continuo
-          setDisplayMode('continuous');
+          setPdfError('No se pudo abrir el libro digital con el motor de lectura. Por favor, reintenta.');
+          setIsLoadingPdf(false);
         }
       }
     };
@@ -155,8 +337,8 @@ export const BookReader: React.FC<BookReaderProps> = ({
     };
   }, [pdfUrl]);
 
-  // Renderizar la página actual en el canvas
-  const renderCurrentPage = useCallback(async (pageNum: number) => {
+  // Renderizar la página actual en el modo "Ojear" (página individual en Canvas)
+  const renderInteractivePage = useCallback(async (pageNum: number) => {
     if (!pdfDoc || !canvasRef.current) return;
 
     setIsRenderingPage(true);
@@ -166,7 +348,7 @@ export const BookReader: React.FC<BookReaderProps> = ({
         try {
           renderTaskRef.current.cancel();
         } catch {
-          // Ignorar cancelación de renderizado anterior
+          // Ignorar cancelación
         }
       }
 
@@ -177,18 +359,17 @@ export const BookReader: React.FC<BookReaderProps> = ({
       const context = canvas.getContext('2d');
       if (!context) return;
 
-      // Calcular escala adaptativa para móviles, tablets y computadoras
       const baseViewport = page.getViewport({ scale: 1.0 });
-      const containerWidth = containerRef.current 
+      const availableWidth = containerRef.current 
         ? containerRef.current.clientWidth - (window.innerWidth < 640 ? 24 : 48)
         : window.innerWidth - 32;
 
-      // Escala ajustada al ancho disponible multiplicada por el zoom del usuario
-      const calculatedScale = Math.min(2.5, Math.max(0.6, (containerWidth / baseViewport.width) * zoomScale));
+      const targetWidth = Math.min(availableWidth, 900);
+      const calculatedScale = Math.min(2.5, Math.max(0.6, (targetWidth / baseViewport.width) * zoomScale));
       const viewport = page.getViewport({ scale: calculatedScale });
 
-      // Soporte Retina / Alta Densidad de Píxeles (HiDPI)
-      const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+      // Soporte Retina / Pantallas HiDPI
+      const dpr = Math.min(window.devicePixelRatio || 1, 2.0);
       canvas.width = Math.floor(viewport.width * dpr);
       canvas.height = Math.floor(viewport.height * dpr);
       canvas.style.width = `${Math.floor(viewport.width)}px`;
@@ -206,7 +387,7 @@ export const BookReader: React.FC<BookReaderProps> = ({
       await renderTask.promise;
     } catch (err: any) {
       if (err?.name !== 'RenderingCancelledException') {
-        console.warn('[Lector] Aviso de renderizado en página:', err);
+        console.warn('[BookReader] Aviso de renderizado:', err);
       }
     } finally {
       setIsRenderingPage(false);
@@ -215,9 +396,9 @@ export const BookReader: React.FC<BookReaderProps> = ({
 
   useEffect(() => {
     if (pdfDoc && displayMode === 'interactive') {
-      renderCurrentPage(currentPage);
+      renderInteractivePage(currentPage);
     }
-  }, [pdfDoc, currentPage, zoomScale, displayMode, renderCurrentPage]);
+  }, [pdfDoc, currentPage, zoomScale, displayMode, renderInteractivePage]);
 
   // Navegación con efecto de paso de página (Ojear)
   const goToNextPage = () => {
@@ -226,7 +407,7 @@ export const BookReader: React.FC<BookReaderProps> = ({
       setTimeout(() => {
         setCurrentPage(p => p + 1);
         setPageFlipClass('');
-      }, 200);
+      }, 180);
     }
   };
 
@@ -236,11 +417,11 @@ export const BookReader: React.FC<BookReaderProps> = ({
       setTimeout(() => {
         setCurrentPage(p => p - 1);
         setPageFlipClass('');
-      }, 200);
+      }, 180);
     }
   };
 
-  // Manejo de gestos táctiles en celulares y tablets (Deslizar para ojear)
+  // Manejo de gestos táctiles (Swipe)
   const handleTouchStart = (e: React.TouchEvent) => {
     touchStartXRef.current = e.touches[0].clientX;
   };
@@ -250,7 +431,6 @@ export const BookReader: React.FC<BookReaderProps> = ({
     const touchEndX = e.changedTouches[0].clientX;
     const diffX = touchEndX - touchStartXRef.current;
 
-    // Umbral de 45px para cambiar de página
     if (diffX < -45) {
       goToNextPage();
     } else if (diffX > 45) {
@@ -287,30 +467,33 @@ export const BookReader: React.FC<BookReaderProps> = ({
     return () => document.removeEventListener('fullscreenchange', handleFsChange);
   }, []);
 
-  // Bloqueo de atajos de teclado y navegación con flechas
+  // Bloqueo de atajos de teclado para guardar/imprimir y navegación con flechas
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P' || e.key === 's' || e.key === 'S')) {
         e.preventDefault();
       }
-      if (e.key === 'ArrowRight') {
-        goToNextPage();
-      } else if (e.key === 'ArrowLeft') {
-        goToPrevPage();
+      if (displayMode === 'interactive') {
+        if (e.key === 'ArrowRight') {
+          goToNextPage();
+        } else if (e.key === 'ArrowLeft') {
+          goToPrevPage();
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentPage, totalPages]);
+  }, [currentPage, totalPages, displayMode]);
 
-  // URL del visor adaptado en modo continuo (sincronizada con la última página guardada)
-  const continuousPdfSrc = useMemo(() => {
-    if (!pdfUrl) return '';
-    if (useWebEngine) {
-      return `https://docs.google.com/viewer?url=${encodeURIComponent(pdfUrl)}&embedded=true`;
+  // Al cambiar al modo continuo, desplazar suavemente a la página actual
+  useEffect(() => {
+    if (displayMode === 'continuous' && continuousContainerRef.current) {
+      const pageEl = document.getElementById(`continuous-page-${currentPage}`);
+      if (pageEl) {
+        pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
     }
-    return `${pdfUrl}#page=${currentPage}&toolbar=0&navpanes=0&scrollbar=0`;
-  }, [pdfUrl, useWebEngine, currentPage]);
+  }, [displayMode]);
 
   return (
     <div 
@@ -318,7 +501,7 @@ export const BookReader: React.FC<BookReaderProps> = ({
       className={`w-full ${isSideBySide ? 'max-w-none px-0 py-0' : 'max-w-5xl mx-auto px-2 sm:px-4 md:px-6 py-2 sm:py-4'} flex-1 flex flex-col select-none`}
       onContextMenu={(e) => e.preventDefault()}
     >
-      {/* BARRA SUPERIOR: RESPONSIVA PARA CELULARES, TABLETS Y ESCRITORIO */}
+      {/* BARRA SUPERIOR: RESPONSIVA */}
       <div className="glass-card rounded-2xl p-3 sm:p-4 mb-3 sm:mb-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         
         {/* Identidad del Libro */}
@@ -345,7 +528,7 @@ export const BookReader: React.FC<BookReaderProps> = ({
         {/* Controles de visualización y modo de lectura */}
         <div className="flex items-center justify-between sm:justify-end gap-1.5 sm:gap-2 flex-wrap">
           
-          {/* Alternar Modo: Libro Interactivo vs Visor Continuo */}
+          {/* Alternar Modo: Ojear (Canvas interactivo) vs Continuo (Scroll vertical fluido) */}
           <div className="flex items-center p-0.5 rounded-xl bg-slate-100 border border-slate-200 text-[11px] font-bold">
             <button
               onClick={() => setDisplayMode('interactive')}
@@ -354,7 +537,7 @@ export const BookReader: React.FC<BookReaderProps> = ({
                   ? 'bg-white text-[#7c3aed] shadow-xs font-black'
                   : 'text-slate-600 hover:text-[#0f2147]'
               }`}
-              title="Lectura con efecto de paso de página optimizada para táctil"
+              title="Lectura página por página optimizada para táctil"
             >
               <BookMarked className="w-3.5 h-3.5" />
               <span>Ojear</span>
@@ -367,39 +550,37 @@ export const BookReader: React.FC<BookReaderProps> = ({
                   ? 'bg-white text-[#7c3aed] shadow-xs font-black'
                   : 'text-slate-600 hover:text-[#0f2147]'
               }`}
-              title="Visor continuo de páginas"
+              title="Lectura continua con scroll vertical suave"
             >
               <Layers className="w-3.5 h-3.5" />
               <span>Continuo</span>
             </button>
           </div>
 
-          {/* Botón Zoom en modo Interactivo */}
-          {displayMode === 'interactive' && (
-            <div className="hidden md:flex items-center gap-1 bg-slate-100 p-0.5 rounded-xl border border-slate-200 text-xs">
-              <button 
-                onClick={handleZoomOut} 
-                className="p-1.5 rounded-lg hover:bg-white text-slate-600 transition" 
-                title="Reducir zoom"
-              >
-                <ZoomOut className="w-3.5 h-3.5" />
-              </button>
-              <button 
-                onClick={handleResetZoom} 
-                className="px-1.5 text-[11px] font-mono font-bold text-slate-700 hover:text-[#7c3aed]"
-                title="Restablecer tamaño"
-              >
-                {Math.round(zoomScale * 100)}%
-              </button>
-              <button 
-                onClick={handleZoomIn} 
-                className="p-1.5 rounded-lg hover:bg-white text-slate-600 transition" 
-                title="Aumentar zoom"
-              >
-                <ZoomIn className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          )}
+          {/* Controles de Zoom */}
+          <div className="hidden sm:flex items-center gap-1 bg-slate-100 p-0.5 rounded-xl border border-slate-200 text-xs">
+            <button 
+              onClick={handleZoomOut} 
+              className="p-1.5 rounded-lg hover:bg-white text-slate-600 transition" 
+              title="Reducir zoom"
+            >
+              <ZoomOut className="w-3.5 h-3.5" />
+            </button>
+            <button 
+              onClick={handleResetZoom} 
+              className="px-1.5 text-[11px] font-mono font-bold text-slate-700 hover:text-[#7c3aed]" 
+              title="Restablecer tamaño (100%)"
+            >
+              {Math.round(zoomScale * 100)}%
+            </button>
+            <button 
+              onClick={handleZoomIn} 
+              className="p-1.5 rounded-lg hover:bg-white text-slate-600 transition" 
+              title="Aumentar zoom"
+            >
+              <ZoomIn className="w-3.5 h-3.5" />
+            </button>
+          </div>
 
           {/* Recargar */}
           <button
@@ -423,9 +604,9 @@ export const BookReader: React.FC<BookReaderProps> = ({
 
       </div>
 
-      {/* ÁREA PRINCIPAL: VISOR DEL LIBRO DIGITAL */}
+      {/* ÁREA PRINCIPAL: VISOR OFICIAL 100% CANVAS CON MOZILLA PDF.JS */}
       <div 
-        className="w-full flex-1 flex flex-col rounded-2xl sm:rounded-3xl overflow-hidden glass-card shadow-xl relative border border-white/80 bg-slate-50"
+        className="w-full flex-1 flex flex-col rounded-2xl sm:rounded-3xl overflow-hidden glass-card shadow-xl relative border border-white/80 bg-slate-100"
         style={{ minHeight: isFullscreen ? 'calc(100vh - 80px)' : 'calc(80vh - 30px)' }}
       >
         
@@ -438,7 +619,7 @@ export const BookReader: React.FC<BookReaderProps> = ({
               Abriendo tu libro digital...
             </h3>
             <p className="text-xs text-slate-500 max-w-xs">
-              Preparando las páginas para tu lectura.
+              Renderizando las páginas en alta resolución con el motor oficial.
             </p>
           </div>
         ) : pdfError ? (
@@ -469,8 +650,8 @@ export const BookReader: React.FC<BookReaderProps> = ({
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
           >
-            {/* Contenedor central de la página del libro con efecto visual */}
-            <div className="flex-1 overflow-auto flex items-center justify-center p-2 sm:p-4 md:p-6 bg-slate-100/70">
+            {/* Contenedor central de la página */}
+            <div className="flex-1 overflow-auto flex items-center justify-center p-2 sm:p-4 md:p-6 bg-slate-100/80">
               <div 
                 className={`relative bg-white shadow-2xl rounded-xl sm:rounded-2xl overflow-hidden transition-all duration-300 border border-slate-200/80 ${pageFlipClass}`}
                 style={{
@@ -484,13 +665,13 @@ export const BookReader: React.FC<BookReaderProps> = ({
                   </div>
                 )}
 
-                {/* Canvas de renderizado de alta fidelidad */}
+                {/* Canvas de renderizado nativo */}
                 <canvas 
                   ref={canvasRef} 
-                  className="block mx-auto max-w-full h-auto select-none"
+                  className="block mx-auto max-w-full h-auto select-none pointer-events-none"
                 />
 
-                {/* Sombra de lomo central para dar sensación de libro real */}
+                {/* Sombra de lomo central para sensación de libro real */}
                 <div className="absolute inset-y-0 left-0 w-3 bg-gradient-to-r from-black/10 to-transparent pointer-events-none" />
               </div>
             </div>
@@ -508,7 +689,7 @@ export const BookReader: React.FC<BookReaderProps> = ({
                 <span className="hidden sm:inline">Anterior</span>
               </button>
 
-              {/* Indicador de Página Central y Deslizador Rápido */}
+              {/* Indicador de Página Central */}
               <div className="flex items-center gap-2 sm:gap-3">
                 <span className="text-xs font-mono font-black text-[#0f2147] bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
                   {currentPage} <span className="text-slate-400 font-normal">/</span> {totalPages}
@@ -543,36 +724,42 @@ export const BookReader: React.FC<BookReaderProps> = ({
           </div>
         ) : (
           /* ================================================================ */
-          /* MODO 2: VISOR CONTINUO CON PARÁMETROS PROTEGIDOS                */
+          /* MODO 2: SCROLL CONTINUO 100% CANVAS CON MOZILLA PDF.JS          */
           /* ================================================================ */
-          <div className="flex-1 flex flex-col relative w-full h-full min-h-[550px] bg-white">
-            <iframe
-              src={continuousPdfSrc}
-              title="Libro Digital Oficial — 101 Buenos Malos Consejos"
-              className="w-full flex-1 border-0 select-none bg-white block"
+          <div className="flex-1 flex flex-col relative w-full h-full bg-slate-100">
+            {/* Contenedor vertical scrollable con todas las páginas */}
+            <div 
+              ref={continuousContainerRef}
+              className="flex-1 overflow-y-auto p-2 sm:p-4 md:p-6 space-y-4"
               style={{
-                height: isFullscreen ? 'calc(100vh - 120px)' : 'calc(80vh - 56px)',
-                minHeight: '520px',
-                width: '100%'
+                height: isFullscreen ? 'calc(100vh - 120px)' : 'calc(80vh - 56px)'
               }}
-            />
+            >
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
+                <ContinuousPageItem
+                  key={pageNum}
+                  pdfDoc={pdfDoc}
+                  pageNum={pageNum}
+                  zoomScale={zoomScale}
+                  containerWidth={containerWidth}
+                  onPageVisible={(visiblePage) => {
+                    setCurrentPage(visiblePage);
+                  }}
+                />
+              ))}
+            </div>
 
             {/* Barra inferior del modo continuo */}
-            <div className="p-3 bg-white border-t border-slate-200 flex flex-wrap items-center justify-between text-xs text-slate-600 gap-2">
+            <div className="p-3 bg-white border-t border-slate-200 flex flex-wrap items-center justify-between text-xs text-slate-600 gap-2 z-20 shadow-sm">
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                 <span>Edición oficial &bull; Lector: <span className="text-[#7c3aed] font-bold">{userEmail}</span></span>
               </div>
 
               <div className="flex items-center gap-3 ml-auto">
-                <button
-                  type="button"
-                  onClick={() => setUseWebEngine(prev => !prev)}
-                  className="text-[11px] font-bold text-[#7c3aed] hover:underline transition"
-                  title="Cambiar motor si tu navegador muestra pantalla oscura"
-                >
-                  {useWebEngine ? 'Usar Visor Directo' : '¿Pantalla oscura? Cambiar motor'}
-                </button>
+                <span className="text-xs font-mono font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200">
+                  Página {currentPage} de {totalPages}
+                </span>
 
                 <div className="flex items-center gap-1 text-slate-500 font-semibold text-[11px]">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />

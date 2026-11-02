@@ -90,6 +90,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const [offlineChapterNumbers, setOfflineChapterNumbers] = useState<Set<number>>(new Set());
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
+  const [downloadingChaptersMap, setDownloadingChaptersMap] = useState<{ [chapterNumber: number]: number }>({});
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const activeBlobUrlRef = useRef<string | null>(null);
@@ -288,7 +289,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
 
         // 1. Si está disponible en el almacén offline cifrado, descifrar al vuelo en memoria
         if (isOffline) {
-          resolvedUrl = await getDecryptedChapterAudioUrl(currentTrack.chapterNumber);
+          resolvedUrl = await getDecryptedChapterAudioUrl(currentTrack.chapterNumber, userEmail);
           if (resolvedUrl) {
             activeBlobUrlRef.current = resolvedUrl;
           }
@@ -398,7 +399,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         const isOffline = await isChapterOfflineAvailable(currentTrack.chapterNumber);
 
         if (isOffline) {
-          url = await getDecryptedChapterAudioUrl(currentTrack.chapterNumber);
+          url = await getDecryptedChapterAudioUrl(currentTrack.chapterNumber, userEmail);
           if (url) {
             if (activeBlobUrlRef.current) URL.revokeObjectURL(activeBlobUrlRef.current);
             activeBlobUrlRef.current = url;
@@ -442,14 +443,16 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     try {
       setIsDownloading(true);
       setDownloadProgress(0);
+      setDownloadingChaptersMap(prev => ({ ...prev, [chapterNumber]: 0 }));
 
       const audioUrl = await getChapterAudioDownloadUrl(chapterNumber, filename);
       if (!audioUrl) {
         throw new Error('No se pudo resolver la URL del audio en Firebase Storage.');
       }
 
-      await saveChapterForOffline(chapterNumber, title, filename, audioUrl, (pct) => {
+      await saveChapterForOffline(chapterNumber, title, filename, audioUrl, userEmail, (pct) => {
         setDownloadProgress(pct);
+        setDownloadingChaptersMap(prev => ({ ...prev, [chapterNumber]: pct }));
       });
 
       setOfflineChapterNumbers(prev => new Set([...prev, chapterNumber]));
@@ -459,6 +462,11 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     } finally {
       setIsDownloading(false);
       setDownloadProgress(0);
+      setDownloadingChaptersMap(prev => {
+        const next = { ...prev };
+        delete next[chapterNumber];
+        return next;
+      });
     }
   };
 
@@ -812,36 +820,46 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             </div>
           </div>
 
-          {/* Botón Discreto: Guardar para escuchar sin conexión (Cifrado AES-GCM en IndexedDB) */}
-          <div className="mt-3.5 pt-3 border-t border-slate-100 flex items-center justify-center">
+          {/* Módulo Visible: Guardar audiolibro para escuchar sin conexión */}
+          <div className="mt-4 pt-3.5 border-t border-slate-100">
             {offlineChapterNumbers.has(currentTrack.chapterNumber) ? (
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200/80 text-[11px] font-bold shadow-2xs">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
-                <span>Disponible sin conexión</span>
+              <div className="w-full flex items-center justify-between p-2.5 px-3.5 rounded-2xl bg-emerald-50 text-emerald-800 border border-emerald-200/80 text-xs font-bold shadow-2xs">
+                <div className="flex items-center gap-2">
+                  <span className="text-base">✅</span>
+                  <span>Capítulo {currentTrack.chapterNumber} guardado sin conexión</span>
+                </div>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     handleDeleteOffline(currentTrack.chapterNumber);
                   }}
-                  className="text-slate-400 hover:text-red-500 ml-1 p-0.5 rounded transition"
+                  className="text-slate-400 hover:text-red-500 p-1.5 rounded-lg hover:bg-emerald-100 transition"
                   title="Eliminar de la memoria local cifrada"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
+                  <Trash2 className="w-4 h-4" />
                 </button>
               </div>
-            ) : isDownloading ? (
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#7c3aed]/10 text-[#7c3aed] border border-[#7c3aed]/20 text-[11px] font-bold">
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-[#7c3aed]" />
-                <span>Cifrando en dispositivo... {downloadProgress}%</span>
+            ) : isDownloading && downloadingChaptersMap[currentTrack.chapterNumber] !== undefined ? (
+              <div className="w-full p-3 rounded-2xl bg-[#7c3aed]/10 border border-[#7c3aed]/20 text-center">
+                <div className="flex items-center justify-center gap-2 text-xs font-black text-[#7c3aed]">
+                  <Loader2 className="w-4 h-4 animate-spin text-[#7c3aed]" />
+                  <span>Descargando y asegurando capítulo... {downloadProgress}%</span>
+                </div>
+                <div className="w-full h-1.5 bg-slate-200 rounded-full mt-2 overflow-hidden">
+                  <div 
+                    className="h-full bg-gradient-to-r from-[#7c3aed] to-[#4f96fe] transition-all duration-300"
+                    style={{ width: `${downloadProgress}%` }}
+                  />
+                </div>
               </div>
             ) : (
               <button
                 onClick={() => handleDownloadOffline(currentTrack.chapterNumber, currentTrack.title, currentTrack.filename)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-[#7c3aed]/10 text-slate-600 hover:text-[#7c3aed] border border-slate-200/80 text-[11px] font-bold transition active:scale-95 cursor-pointer"
-                title="Cifra con AES-GCM y guarda este capítulo en la memoria de tu dispositivo para reproducir sin internet"
+                className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-2xl bg-gradient-to-r from-[#7c3aed] to-[#4f96fe] hover:from-[#6d28d9] hover:to-[#3b82f6] text-white font-black text-xs sm:text-sm shadow-lg shadow-[#7c3aed]/25 transition active:scale-95 cursor-pointer"
+                title="Cifra en memoria con AES-GCM derivado de tu sesión y guarda este capítulo en IndexedDB para reproducir sin conexión"
               >
-                <Download className="w-3.5 h-3.5 text-[#7c3aed]" />
-                <span>Guardar para escuchar sin conexión</span>
+                <span className="text-base sm:text-lg">⬇️</span>
+                <span>Guardar audiolibro para escuchar sin conexión</span>
               </button>
             )}
           </div>
@@ -975,35 +993,55 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
                         </div>
                       </div>
 
-                      {/* Estado de reproducción y disponibilidad offline */}
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        {offlineChapterNumbers.has(track.chapterNumber) && (
-                          <span 
-                            className="p-1 rounded-md bg-emerald-50 text-emerald-600 border border-emerald-100 flex items-center gap-1 text-[10px] font-bold"
-                            title="Guardado y cifrado para escuchar sin conexión"
+                      {/* Estado de reproducción y descarga individual */}
+                      <div className="flex items-center gap-2 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                        {/* Botón o ícono de descarga individual (📥 / ✅ "Guardado") */}
+                        {offlineChapterNumbers.has(track.chapterNumber) ? (
+                          <div className="flex items-center gap-1">
+                            <span 
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-extrabold shadow-2xs"
+                              title="Capítulo guardado y asegurado para escuchar sin conexión"
+                            >
+                              <span>✅</span>
+                              <span>Guardado</span>
+                            </span>
+                            <button
+                              onClick={() => handleDeleteOffline(track.chapterNumber)}
+                              className="p-1 text-slate-400 hover:text-red-500 rounded-lg hover:bg-slate-100 transition"
+                              title="Eliminar del dispositivo"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : downloadingChaptersMap[track.chapterNumber] !== undefined ? (
+                          <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-[#7c3aed]/10 text-[#7c3aed] text-[11px] font-bold">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-[#7c3aed]" />
+                            <span>{downloadingChaptersMap[track.chapterNumber]}%</span>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => handleDownloadOffline(track.chapterNumber, track.title, track.filename)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-[#7c3aed] hover:text-white text-slate-700 text-[11px] font-bold transition shadow-2xs active:scale-95"
+                            title="Descargar y asegurar este capítulo para escuchar sin conexión"
                           >
-                            <CheckCircle2 className="w-3 h-3" />
-                            <span className="hidden sm:inline">Offline</span>
-                          </span>
+                            <span>📥</span>
+                            <span className="hidden sm:inline">Guardar</span>
+                          </button>
                         )}
 
                         {isCurrent ? (
                           isPlaying ? (
-                            <div className="flex items-end gap-0.5 h-4">
+                            <div className="flex items-end gap-0.5 h-4 ml-1">
                               <span className="w-1 bg-[#7c3aed] h-3 animate-pulse" />
                               <span className="w-1 bg-[#7c3aed] h-4 animate-bounce" />
                               <span className="w-1 bg-[#7c3aed] h-2 animate-pulse" />
                             </div>
                           ) : (
-                            <span className="text-[11px] font-bold text-[#7c3aed] bg-[#7c3aed]/15 px-2 py-0.5 rounded-md">
-                              Seleccionado
+                            <span className="text-[11px] font-bold text-[#7c3aed] bg-[#7c3aed]/15 px-2 py-0.5 rounded-md ml-1">
+                              Activo
                             </span>
                           )
-                        ) : (
-                          <span className="text-[11px] font-semibold text-slate-400 group-hover:text-slate-600">
-                            Saltar
-                          </span>
-                        )}
+                        ) : null}
                       </div>
                     </div>
                   );
