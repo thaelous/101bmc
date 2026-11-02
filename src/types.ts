@@ -18,6 +18,8 @@ export interface CodigoDocument {
   usado_por: string | null;
   fecha_canje: string | null;
   created_at?: string;
+  multiuso?: boolean;
+  tipo?: string;
 }
 
 export interface AudioTrackItem {

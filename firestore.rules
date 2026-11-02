@@ -5,12 +5,16 @@ service cloud.firestore {
     // Reglas de seguridad para colección "codigos"
     // Proyecto: 101 Buenos Malos Consejos
     match /codigos/{codigoId} {
-      // Permitir leer códigos no canjeados o aquellos pertenecientes al usuario
+      // Permitir leer códigos no canjeados, códigos universales o aquellos pertenecientes al usuario
       allow get: if (resource.data.canjeado == false) ||
+        (resource.data.multiuso == true) ||
+        (resource.data.tipo == "universal") ||
         (request.auth != null && (resource.data.usado_por == request.auth.token.email || resource.data.usadoPor == request.auth.token.email));
 
       // Permitir listar códigos
       allow list: if (resource.data.canjeado == false) ||
+        (resource.data.multiuso == true) ||
+        (resource.data.tipo == "universal") ||
         (request.auth != null && (resource.data.usado_por == request.auth.token.email || resource.data.usadoPor == request.auth.token.email));
 
       // Quema y canje de código

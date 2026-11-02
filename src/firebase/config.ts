@@ -97,6 +97,8 @@ const INITIAL_FALLBACK_CODES: CodigoDocument[] = [
   {
     codigo: "LIBRO-101-VIP",
     canjeado: false,
+    multiuso: true,
+    tipo: "universal",
     usado_por: null,
     fecha_canje: null,
     created_at: new Date().toISOString()
@@ -453,12 +455,6 @@ export async function redeemAccessCode(
   }
 
   const realGoogleEmail = userEmail ? userEmail.trim().toLowerCase() : '';
-  if (!realGoogleEmail || !realGoogleEmail.includes('@')) {
-    return {
-      success: false,
-      message: 'Ingresa tu correo electrónico real para vincular tu licencia a tu cuenta.'
-    };
-  }
 
   if (db) {
     try {
@@ -480,10 +476,50 @@ export async function redeemAccessCode(
 
       if (docSnap && docSnap.exists()) {
         const data = docSnap.data();
+
+        // 1. SOPORTE DE CÓDIGO UNIVERSAL PERMANENTE:
+        // Si el documento tiene multiuso === true o tipo === "universal":
+        // - NO marques el código como canjeado: true. Déjalo siempre intacto en Firestore para que otras personas puedan usarlo.
+        // - Guarda la sesión local del usuario: localStorage.setItem('bmc_acceso_autorizado', correoDelUsuario || 'lector_vip').
+        // - DESBLOQUEA DIRECTAMENTE el contenido (Audiolibro y Libro Digital) de inmediato.
+        const isUniversal = data.multiuso === true || data.tipo === 'universal';
+
+        if (isUniversal) {
+          const authUserEmail = (realGoogleEmail && realGoogleEmail !== 'lector_vip') ? realGoogleEmail : 'lector_vip';
+          const license: CodigoDocument = {
+            id: docSnap.id,
+            codigo: data.codigo || codigoLimpio,
+            canjeado: false, // Déjalo siempre intacto en Firestore
+            usado_por: authUserEmail,
+            fecha_canje: new Date().toLocaleString(),
+            multiuso: true,
+            tipo: 'universal'
+          };
+
+          // Guardar sesión local de inmediato y abrir
+          localStorage.setItem('bmc_acceso_autorizado', authUserEmail);
+          localStorage.setItem('101_active_license', JSON.stringify(license));
+
+          return {
+            success: true,
+            message: '¡Código universal verificado! Acceso permanente concedido.',
+            license
+          };
+        }
+
+        // 2. CÓDIGOS REGULARES (INDIVIDUALES):
+        // Si el código NO es universal, requiere email real y se canjea
+        if (!realGoogleEmail || !realGoogleEmail.includes('@')) {
+          return {
+            success: false,
+            message: 'Ingresa tu correo electrónico real para vincular tu licencia individual a tu cuenta.'
+          };
+        }
+
         const isCanjeado = data.canjeado === true;
         const currentUsadoPor = (data.usado_por || data.usadoPor || '').toString().toLowerCase().trim();
 
-        // 3. Si canjeado === true: verificar si coincide con el correo del usuario
+        // Si ya está canjeado: verificar si coincide con el correo del usuario
         if (isCanjeado) {
           if (currentUsadoPor === realGoogleEmail) {
             const license: CodigoDocument = {
@@ -507,7 +543,7 @@ export async function redeemAccessCode(
           };
         }
 
-        // 4. Si canjeado === false y activo === true (o no restringido)
+        // Si activo === false
         if (data.activo === false) {
           return {
             success: false,
@@ -515,6 +551,7 @@ export async function redeemAccessCode(
           };
         }
 
+        // Marcar como canjeado en Firestore para códigos individuales
         const docRef = doc(db, 'codigos', docSnap.id);
         const fechaCanjeActual = new Date().toLocaleString();
         
@@ -533,7 +570,7 @@ export async function redeemAccessCode(
           fecha_canje: fechaCanjeActual
         };
 
-        // 5. Guardar bmc_acceso_autorizado y abrir contenido de inmediato
+        // Guardar bmc_acceso_autorizado y abrir contenido de inmediato
         localStorage.setItem('bmc_acceso_autorizado', realGoogleEmail);
         localStorage.setItem('101_active_license', JSON.stringify(newLicense));
 
@@ -566,6 +603,26 @@ export async function redeemAccessCode(
 
   if (codeIndex !== -1) {
     const existing = codes[codeIndex];
+
+    // Soporte universal en respaldo local
+    if (existing.multiuso === true || existing.tipo === 'universal') {
+      const authUserEmail = (realGoogleEmail && realGoogleEmail !== 'lector_vip') ? realGoogleEmail : 'lector_vip';
+      localStorage.setItem('bmc_acceso_autorizado', authUserEmail);
+      localStorage.setItem('101_active_license', JSON.stringify(existing));
+      return {
+        success: true,
+        message: '¡Código universal verificado! Acceso permanente concedido.',
+        license: existing
+      };
+    }
+
+    if (!realGoogleEmail || !realGoogleEmail.includes('@')) {
+      return {
+        success: false,
+        message: 'Ingresa tu correo electrónico real para vincular tu licencia individual.'
+      };
+    }
+
     if (existing.canjeado && existing.usado_por && existing.usado_por.toLowerCase() !== realGoogleEmail) {
       return {
         success: false,

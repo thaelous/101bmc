@@ -43,11 +43,34 @@ export const BookReader: React.FC<BookReaderProps> = ({
 
   // Estados del visor interactivo Canvas
   const [pdfDoc, setPdfDoc] = useState<any>(null);
-  const [currentPage, setCurrentPage] = useState(1);
+  
+  // Última posición de lectura (número de página) guardada automáticamente en localStorage
+  const [currentPage, setCurrentPage] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('bmc_ultima_pagina_lectura');
+      if (saved) {
+        const p = parseInt(saved, 10);
+        if (!isNaN(p) && p > 0) return p;
+      }
+    } catch {}
+    return 1;
+  });
+
   const [totalPages, setTotalPages] = useState(1);
   const [isRenderingPage, setIsRenderingPage] = useState(false);
   const [zoomScale, setZoomScale] = useState(1.0);
   const [pageFlipClass, setPageFlipClass] = useState<string>('');
+
+  // Guardar automáticamente la posición de lectura en localStorage
+  useEffect(() => {
+    if (currentPage > 0) {
+      try {
+        localStorage.setItem('bmc_ultima_pagina_lectura', currentPage.toString());
+      } catch (err) {
+        console.warn('[BookReader] Error al guardar posición de lectura:', err);
+      }
+    }
+  }, [currentPage]);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -111,7 +134,10 @@ export const BookReader: React.FC<BookReaderProps> = ({
         const doc = await loadingTask.promise;
         if (!isCancelled) {
           setPdfDoc(doc);
-          setTotalPages(doc.numPages || 1);
+          const max = doc.numPages || 1;
+          setTotalPages(max);
+          // Si la página guardada en localStorage supera el total de páginas, ajustarla
+          setCurrentPage(prev => (prev > max ? max : prev < 1 ? 1 : prev));
         }
       } catch (err: any) {
         console.info('[Lector] Motor interactivo usando visor adaptado continuo:', err?.message || err);
@@ -277,14 +303,14 @@ export const BookReader: React.FC<BookReaderProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [currentPage, totalPages]);
 
-  // URL del visor adaptado en modo continuo
+  // URL del visor adaptado en modo continuo (sincronizada con la última página guardada)
   const continuousPdfSrc = useMemo(() => {
     if (!pdfUrl) return '';
     if (useWebEngine) {
       return `https://docs.google.com/viewer?url=${encodeURIComponent(pdfUrl)}&embedded=true`;
     }
-    return `${pdfUrl}#toolbar=0&navpanes=0&scrollbar=0`;
-  }, [pdfUrl, useWebEngine]);
+    return `${pdfUrl}#page=${currentPage}&toolbar=0&navpanes=0&scrollbar=0`;
+  }, [pdfUrl, useWebEngine, currentPage]);
 
   return (
     <div 
@@ -487,6 +513,16 @@ export const BookReader: React.FC<BookReaderProps> = ({
                 <span className="text-xs font-mono font-black text-[#0f2147] bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
                   {currentPage} <span className="text-slate-400 font-normal">/</span> {totalPages}
                 </span>
+
+                {currentPage > 1 && (
+                  <span 
+                    className="hidden sm:inline-flex items-center gap-1 text-[10px] font-bold text-[#7c3aed] bg-[#7c3aed]/10 px-2 py-1 rounded-lg"
+                    title="Tu avance de lectura se guarda automáticamente en este dispositivo"
+                  >
+                    <BookMarked className="w-3 h-3" />
+                    <span>Guardado</span>
+                  </span>
+                )}
 
                 <span className="hidden md:inline text-[11px] text-slate-400 font-medium italic">
                   (Desliza para ojear)

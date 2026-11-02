@@ -18,7 +18,11 @@ import {
   ArrowRight,
   AlertCircle,
   RefreshCw,
-  Sparkles
+  Sparkles,
+  Download,
+  CheckCircle2,
+  WifiOff,
+  Trash2
 } from 'lucide-react';
 import { Chapter, AudioTrackItem } from '../types';
 import { 
@@ -26,6 +30,13 @@ import {
   getChapterAudioDownloadUrl,
   generateDefault113Tracks 
 } from '../firebase/config';
+import {
+  isChapterOfflineAvailable,
+  getAllOfflineChapterNumbers,
+  saveChapterForOffline,
+  getDecryptedChapterAudioUrl,
+  deleteOfflineChapter
+} from '../services/offlineAudioVault';
 
 interface AudioPlayerProps {
   chapters?: Chapter[];
@@ -43,7 +54,19 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
 }) => {
   // Pistas dinámicas con títulos oficiales de Robert Pacheco (1 a 113)
   const [tracks, setTracks] = useState<AudioTrackItem[]>(() => generateDefault113Tracks());
-  const [activeTrackIndex, setActiveTrackIndex] = useState(currentChapterIndex);
+  
+  // Último capítulo escuchado guardado automáticamente en localStorage
+  const [activeTrackIndex, setActiveTrackIndex] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('bmc_ultimo_capitulo_audio');
+      if (saved !== null) {
+        const idx = parseInt(saved, 10);
+        if (!isNaN(idx) && idx >= 0 && idx < 113) return idx;
+      }
+    } catch {}
+    return typeof currentChapterIndex === 'number' ? currentChapterIndex : 0;
+  });
+
   const [isLoadingTracks, setIsLoadingTracks] = useState(false);
   const [isLoadingAudioUrl, setIsLoadingAudioUrl] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
@@ -62,8 +85,59 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const [sleepTimerMinutes, setSleepTimerMinutes] = useState<number | null>(null);
   const [sleepTimerRemaining, setSleepTimerRemaining] = useState<number | null>(null);
 
+  // Estados para modo offline y cifrado local en navegador
+  const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [offlineChapterNumbers, setOfflineChapterNumbers] = useState<Set<number>>(new Set());
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const activeBlobUrlRef = useRef<string | null>(null);
   const timerIntervalRef = useRef<any>(null);
+  const hasRestoredInitialPositionRef = useRef<boolean>(false);
+  const lastSavedTimeRef = useRef<number>(0);
+
+  // Escuchar cambios de conectividad (Online / Offline)
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Cargar índice de capítulos guardados offline al inicializar
+  useEffect(() => {
+    let isMounted = true;
+    getAllOfflineChapterNumbers()
+      .then((numbers) => {
+        if (isMounted) {
+          setOfflineChapterNumbers(new Set(numbers));
+        }
+      })
+      .catch((err) => {
+        console.warn('[AudioPlayer] Error al cargar capítulos offline:', err);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Limpiar blob URL al desmontar componente
+  useEffect(() => {
+    return () => {
+      if (activeBlobUrlRef.current) {
+        URL.revokeObjectURL(activeBlobUrlRef.current);
+        activeBlobUrlRef.current = null;
+      }
+    };
+  }, []);
 
   // Cargar lista dinámica desde Firebase Storage al iniciar y combinar con títulos de Robert Pacheco
   useEffect(() => {
@@ -109,20 +183,48 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     const audio = audioRef.current;
 
     const handleLoadedMetadata = () => {
-      if (audio.duration && !isNaN(audio.duration) && audio.duration > 0) {
-        setDuration(audio.duration);
-      } else {
-        setDuration(currentTrack.durationSeconds || 160);
-      }
+      const audioDuration = audio.duration && !isNaN(audio.duration) && audio.duration > 0
+        ? audio.duration
+        : currentTrack.durationSeconds || 160;
+
+      setDuration(audioDuration);
       setIsLoadingAudioUrl(false);
       setAudioError(null);
+
+      // Restaurar automáticamente el segundo exacto donde se quedó el usuario
+      if (!hasRestoredInitialPositionRef.current) {
+        hasRestoredInitialPositionRef.current = true;
+        try {
+          const savedTimeStr = localStorage.getItem('bmc_ultimo_tiempo_audio');
+          if (savedTimeStr) {
+            const savedTime = parseFloat(savedTimeStr);
+            if (!isNaN(savedTime) && savedTime > 0 && savedTime < audioDuration) {
+              audio.currentTime = savedTime;
+              setCurrentTime(savedTime);
+            }
+          }
+        } catch {}
+      }
     };
 
     const handleTimeUpdate = () => {
-      setCurrentTime(audio.currentTime);
+      const time = audio.currentTime;
+      setCurrentTime(time);
+
+      // Guardar automáticamente la posición en localStorage cada 2 segundos
+      const now = Date.now();
+      if (now - lastSavedTimeRef.current > 2000) {
+        lastSavedTimeRef.current = now;
+        try {
+          localStorage.setItem('bmc_ultimo_tiempo_audio', time.toString());
+        } catch {}
+      }
     };
 
     const handleEnded = () => {
+      try {
+        localStorage.setItem('bmc_ultimo_tiempo_audio', '0');
+      } catch {}
       if (sleepTimerMinutes === -1) {
         pauseAudio();
         setSleepTimerMinutes(null);
@@ -151,7 +253,22 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     };
   }, [activeTrackIndex, sleepTimerMinutes, currentTrack]);
 
-  // Cargar URL segura del capítulo actual desde Firebase Storage mediante getDownloadURL()
+  // Guardar última posición y capítulo al cerrar la pestaña o navegar
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (audioRef.current) {
+        try {
+          localStorage.setItem('bmc_ultimo_tiempo_audio', audioRef.current.currentTime.toString());
+          localStorage.setItem('bmc_ultimo_capitulo_audio', activeTrackIndex.toString());
+        } catch {}
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [activeTrackIndex]);
+
+  // Cargar URL del capítulo: si está offline descifra el blob de IndexedDB, si está online transmite desde Firebase Storage
   useEffect(() => {
     let isCancelled = false;
     setIsLoadingAudioUrl(true);
@@ -160,12 +277,37 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
 
     const loadChapterAudio = async () => {
       try {
-        const url = await getChapterAudioDownloadUrl(currentTrack.chapterNumber, currentTrack.filename);
-        
-        if (isCancelled) return;
+        // Liberar URL temporal previa de memoria
+        if (activeBlobUrlRef.current) {
+          URL.revokeObjectURL(activeBlobUrlRef.current);
+          activeBlobUrlRef.current = null;
+        }
 
-        if (url && audioRef.current) {
-          audioRef.current.src = url;
+        let resolvedUrl: string | null = null;
+        const isOffline = await isChapterOfflineAvailable(currentTrack.chapterNumber);
+
+        // 1. Si está disponible en el almacén offline cifrado, descifrar al vuelo en memoria
+        if (isOffline) {
+          resolvedUrl = await getDecryptedChapterAudioUrl(currentTrack.chapterNumber);
+          if (resolvedUrl) {
+            activeBlobUrlRef.current = resolvedUrl;
+          }
+        }
+
+        // 2. Si no está guardado offline y hay internet, obtener URL directa de Firebase Storage
+        if (!resolvedUrl && navigator.onLine) {
+          resolvedUrl = await getChapterAudioDownloadUrl(currentTrack.chapterNumber, currentTrack.filename);
+        }
+
+        if (isCancelled) {
+          if (resolvedUrl && resolvedUrl.startsWith('blob:')) {
+            URL.revokeObjectURL(resolvedUrl);
+          }
+          return;
+        }
+
+        if (resolvedUrl && audioRef.current) {
+          audioRef.current.src = resolvedUrl;
           audioRef.current.playbackRate = playbackRate;
           audioRef.current.volume = isMuted ? 0 : volume;
 
@@ -185,13 +327,17 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
           }
         } else {
           if (!isCancelled) {
-            setAudioError(`El archivo ${currentTrack.filename} no tiene URL de descarga disponible en Firebase Storage.`);
+            if (!navigator.onLine) {
+              setAudioError('Sin conexión. Puedes escuchar los capítulos que hayas guardado previamente.');
+            } else {
+              setAudioError(`El archivo ${currentTrack.filename} no tiene URL de descarga disponible en Firebase Storage.`);
+            }
           }
         }
       } catch (err: any) {
-        console.warn('[AudioPlayer] Error al resolver downloadURL:', err);
+        console.warn('[AudioPlayer] Error al resolver fuente de audio:', err);
         if (!isCancelled) {
-          setAudioError(`Error al obtener ${currentTrack.filename} desde Firebase Storage.`);
+          setAudioError(navigator.onLine ? `Error al obtener ${currentTrack.filename} desde Firebase Storage.` : 'Sin conexión a internet.');
           setIsPlaying(false);
         }
       } finally {
@@ -244,11 +390,25 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     setAudioError(null);
     if (!audioRef.current) return;
 
-    // Si aún no tiene src, está vacío o hubo un error previo, resolver URL mediante getDownloadURL()
+    // Si aún no tiene src, está vacío o hubo un error previo, resolver URL
     if (!audioRef.current.src || audioRef.current.src === window.location.href || audioError) {
       setIsLoadingAudioUrl(true);
       try {
-        const url = await getChapterAudioDownloadUrl(currentTrack.chapterNumber, currentTrack.filename);
+        let url: string | null = null;
+        const isOffline = await isChapterOfflineAvailable(currentTrack.chapterNumber);
+
+        if (isOffline) {
+          url = await getDecryptedChapterAudioUrl(currentTrack.chapterNumber);
+          if (url) {
+            if (activeBlobUrlRef.current) URL.revokeObjectURL(activeBlobUrlRef.current);
+            activeBlobUrlRef.current = url;
+          }
+        }
+
+        if (!url && navigator.onLine) {
+          url = await getChapterAudioDownloadUrl(currentTrack.chapterNumber, currentTrack.filename);
+        }
+
         if (url && audioRef.current) {
           audioRef.current.src = url;
           audioRef.current.playbackRate = playbackRate;
@@ -257,7 +417,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
           setIsPlaying(true);
           setAudioError(null);
         } else {
-          setAudioError('No se pudo encontrar el audio del capítulo actual.');
+          setAudioError(!navigator.onLine ? 'Sin conexión a internet. Guarda el capítulo para reproducir offline.' : 'No se pudo encontrar el audio del capítulo actual.');
         }
       } catch (err: any) {
         console.warn('[AudioPlayer] Error al reproducir audio mediante getDownloadURL():', err);
@@ -278,9 +438,50 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     }
   };
 
+  const handleDownloadOffline = async (chapterNumber: number, title: string, filename: string) => {
+    try {
+      setIsDownloading(true);
+      setDownloadProgress(0);
+
+      const audioUrl = await getChapterAudioDownloadUrl(chapterNumber, filename);
+      if (!audioUrl) {
+        throw new Error('No se pudo resolver la URL del audio en Firebase Storage.');
+      }
+
+      await saveChapterForOffline(chapterNumber, title, filename, audioUrl, (pct) => {
+        setDownloadProgress(pct);
+      });
+
+      setOfflineChapterNumbers(prev => new Set([...prev, chapterNumber]));
+    } catch (err: any) {
+      console.warn('[AudioPlayer] Error al guardar capítulo offline:', err);
+      setAudioError('No se pudo guardar el capítulo para escuchar sin conexión.');
+    } finally {
+      setIsDownloading(false);
+      setDownloadProgress(0);
+    }
+  };
+
+  const handleDeleteOffline = async (chapterNumber: number) => {
+    try {
+      await deleteOfflineChapter(chapterNumber);
+      setOfflineChapterNumbers(prev => {
+        const next = new Set(prev);
+        next.delete(chapterNumber);
+        return next;
+      });
+    } catch (err) {
+      console.warn('[AudioPlayer] Error al eliminar audio offline:', err);
+    }
+  };
+
   const pauseAudio = () => {
     if (audioRef.current) {
       audioRef.current.pause();
+      try {
+        localStorage.setItem('bmc_ultimo_tiempo_audio', audioRef.current.currentTime.toString());
+        localStorage.setItem('bmc_ultimo_capitulo_audio', activeTrackIndex.toString());
+      } catch {}
     }
     setIsPlaying(false);
   };
@@ -298,6 +499,9 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     setCurrentTime(newTime);
     if (audioRef.current) {
       audioRef.current.currentTime = newTime;
+      try {
+        localStorage.setItem('bmc_ultimo_tiempo_audio', newTime.toString());
+      } catch {}
     }
   };
 
@@ -306,12 +510,20 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
       const newTime = Math.max(0, Math.min(audioRef.current.currentTime + seconds, duration || 160));
       audioRef.current.currentTime = newTime;
       setCurrentTime(newTime);
+      try {
+        localStorage.setItem('bmc_ultimo_tiempo_audio', newTime.toString());
+      } catch {}
     }
   };
 
   const handleTrackChange = (newIndex: number) => {
     if (newIndex >= 0 && newIndex < tracks.length) {
       setActiveTrackIndex(newIndex);
+      setCurrentTime(0);
+      try {
+        localStorage.setItem('bmc_ultimo_capitulo_audio', newIndex.toString());
+        localStorage.setItem('bmc_ultimo_tiempo_audio', '0');
+      } catch {}
       if (onChapterSelect) {
         onChapterSelect(newIndex);
       }
@@ -397,14 +609,23 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
               <span>Audiolibro Oficial &bull; 113 Capítulos</span>
             </div>
 
-            <button
-              onClick={() => setShowChapterDrawer(true)}
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-100 hover:bg-[#7c3aed]/10 text-slate-700 hover:text-[#7c3aed] text-[11px] font-bold transition"
-              title="Abrir lista de reproducción completa"
-            >
-              <ListMusic className="w-3.5 h-3.5" />
-              <span>Capítulos</span>
-            </button>
+            <div className="flex items-center gap-1.5">
+              {!isOnline && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-bold" title="Sin conexión a internet. Reproduciendo desde memoria local.">
+                  <WifiOff className="w-3 h-3 text-amber-600" />
+                  <span>Offline</span>
+                </span>
+              )}
+
+              <button
+                onClick={() => setShowChapterDrawer(true)}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-100 hover:bg-[#7c3aed]/10 text-slate-700 hover:text-[#7c3aed] text-[11px] font-bold transition"
+                title="Abrir lista de reproducción completa"
+              >
+                <ListMusic className="w-3.5 h-3.5" />
+                <span>Capítulos</span>
+              </button>
+            </div>
           </div>
 
           {/* Arte Central Redondo con logo.png y efecto de disco giratorio */}
@@ -591,6 +812,40 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             </div>
           </div>
 
+          {/* Botón Discreto: Guardar para escuchar sin conexión (Cifrado AES-GCM en IndexedDB) */}
+          <div className="mt-3.5 pt-3 border-t border-slate-100 flex items-center justify-center">
+            {offlineChapterNumbers.has(currentTrack.chapterNumber) ? (
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200/80 text-[11px] font-bold shadow-2xs">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                <span>Disponible sin conexión</span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteOffline(currentTrack.chapterNumber);
+                  }}
+                  className="text-slate-400 hover:text-red-500 ml-1 p-0.5 rounded transition"
+                  title="Eliminar de la memoria local cifrada"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : isDownloading ? (
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#7c3aed]/10 text-[#7c3aed] border border-[#7c3aed]/20 text-[11px] font-bold">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-[#7c3aed]" />
+                <span>Cifrando en dispositivo... {downloadProgress}%</span>
+              </div>
+            ) : (
+              <button
+                onClick={() => handleDownloadOffline(currentTrack.chapterNumber, currentTrack.title, currentTrack.filename)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-[#7c3aed]/10 text-slate-600 hover:text-[#7c3aed] border border-slate-200/80 text-[11px] font-bold transition active:scale-95 cursor-pointer"
+                title="Cifra con AES-GCM y guarda este capítulo en la memoria de tu dispositivo para reproducir sin internet"
+              >
+                <Download className="w-3.5 h-3.5 text-[#7c3aed]" />
+                <span>Guardar para escuchar sin conexión</span>
+              </button>
+            )}
+          </div>
+
         </div>
       </div>
 
@@ -720,8 +975,18 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
                         </div>
                       </div>
 
-                      {/* Estado de reproducción */}
+                      {/* Estado de reproducción y disponibilidad offline */}
                       <div className="flex items-center gap-2 flex-shrink-0">
+                        {offlineChapterNumbers.has(track.chapterNumber) && (
+                          <span 
+                            className="p-1 rounded-md bg-emerald-50 text-emerald-600 border border-emerald-100 flex items-center gap-1 text-[10px] font-bold"
+                            title="Guardado y cifrado para escuchar sin conexión"
+                          >
+                            <CheckCircle2 className="w-3 h-3" />
+                            <span className="hidden sm:inline">Offline</span>
+                          </span>
+                        )}
+
                         {isCurrent ? (
                           isPlaying ? (
                             <div className="flex items-end gap-0.5 h-4">

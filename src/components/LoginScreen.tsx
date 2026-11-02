@@ -56,22 +56,23 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       return;
     }
 
-    if (!trimmedEmail || !trimmedEmail.includes('@') || !trimmedEmail.includes('.')) {
-      setCodeError('Por favor ingresa tu correo electrónico (ej: tu-nombre@gmail.com) para vincular tu licencia.');
-      return;
-    }
-
     setIsCheckingCode(true);
     setCodeError(null);
     setLoginError(null);
 
     try {
-      // Canjear código directamente en Firestore asociándolo estrictamente a trimmedEmail
-      const result = await redeemAccessCode(trimmedCode, trimmedEmail);
+      const emailForRedeem = trimmedEmail || 'lector_vip';
+      const result = await redeemAccessCode(trimmedCode, emailForRedeem);
 
       if (result.success && result.license) {
-        localStorage.setItem('bmc_acceso_autorizado', trimmedEmail);
-        localStorage.setItem('101_user_email', trimmedEmail);
+        const authorizedEmail = (trimmedEmail && trimmedEmail.includes('@')) 
+          ? trimmedEmail 
+          : (result.license.usado_por || 'lector_vip');
+
+        localStorage.setItem('bmc_acceso_autorizado', authorizedEmail);
+        if (trimmedEmail && trimmedEmail.includes('@')) {
+          localStorage.setItem('101_user_email', trimmedEmail);
+        }
 
         confetti({
           particleCount: 120,
@@ -81,9 +82,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
         });
 
         const userProfile: UserProfile = connectedUser || {
-          uid: `user-${trimmedEmail.replace(/[^a-zA-Z0-9]/g, '_')}`,
-          email: trimmedEmail,
-          displayName: trimmedEmail.split('@')[0] || 'Lector Oficial',
+          uid: `user-${authorizedEmail.replace(/[^a-zA-Z0-9]/g, '_')}`,
+          email: authorizedEmail,
+          displayName: authorizedEmail.split('@')[0] || 'Lector Oficial',
           photoURL: null,
           emailVerified: true
         };
