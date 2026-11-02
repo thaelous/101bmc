@@ -69,6 +69,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       const result = await redeemAccessCode(trimmedCode, trimmedEmail);
 
       if (result.success && result.license) {
+        localStorage.setItem('bmc_acceso_autorizado', trimmedEmail);
         localStorage.setItem('101_user_email', trimmedEmail);
 
         confetti({
@@ -118,6 +119,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
         // 1. Verificar si ya tenía una compra registrada en Firestore
         const existingLicense = await checkUserExistingLicense(cleanEmail);
         if (existingLicense) {
+          localStorage.setItem('bmc_acceso_autorizado', cleanEmail);
           if (onDirectCodeAccess) {
             onDirectCodeAccess(existingLicense, user);
           } else {

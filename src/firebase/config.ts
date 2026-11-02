@@ -39,7 +39,7 @@ import { getOfficialAudioTracks, OFFICIAL_113_CHAPTERS, titulosOficiales } from 
 // CONFIGURACIÓN OFICIAL DE FIREBASE (libros-1f750)
 // ============================================================================
 export const firebaseConfig = {
-    apiKey: "AIzaSyBzn-o5aK7Xb9x3ZY_k-UkXLCCgum-ZiTs",
+    apiKey: "AIzaSyBzno05aK7Xb9x3ZY_k-UkXLCCgum-ZiTs",
     authDomain: "libros-1f750.firebaseapp.com",
     projectId: "libros-1f750",
     storageBucket: "libros-1f750.firebasestorage.app",
@@ -123,11 +123,9 @@ export const saveLocalCodes = (codes: CodigoDocument[]) => {
 // ============================================================================
 
 export async function loginWithGoogle(): Promise<UserProfile> {
-  if (!auth || !googleProvider) {
-    throw new Error('El servicio de autenticación de Google no está disponible.');
-  }
-
-  const result = await signInWithPopup(auth, googleProvider);
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+  const result = await signInWithPopup(auth, provider);
   const user = result.user;
 
   if (!user || !user.email) {
@@ -208,30 +206,41 @@ export async function checkUserExistingLicense(userEmail: string): Promise<Codig
   if (!userEmail) return null;
   const sanitizedEmail = userEmail.toLowerCase().trim();
 
-  // 1. Comprobación rápida en caché local de licencia activa
-  try {
+  // 1. Revisar si existe bmc_acceso_autorizado en localStorage
+  const authStored = localStorage.getItem('bmc_acceso_autorizado');
+  if (authStored && (authStored.toLowerCase().trim() === sanitizedEmail || authStored === 'true')) {
     const cachedLicenseStr = localStorage.getItem('101_active_license');
     if (cachedLicenseStr) {
-      const cached = JSON.parse(cachedLicenseStr);
-      if (cached && cached.usado_por && cached.usado_por.toLowerCase().trim() === sanitizedEmail) {
-        return cached;
-      }
+      try {
+        const cached = JSON.parse(cachedLicenseStr);
+        if (cached) return cached;
+      } catch {}
     }
-  } catch {}
+  }
 
-  // 2. Consulta en Firestore: indexada por usado_por, 100% compatible con firestore.rules
+  // 2. Consulta en Firestore: comprobar colección "codigos" con 'usado_por' y 'usadoPor'
   if (db) {
     try {
       const codigosRef = collection(db, 'codigos');
       
-      // Consulta 1: Email en minúsculas
-      let q = query(codigosRef, where('usado_por', '==', sanitizedEmail));
-      let querySnapshot = await getDocs(q);
+      // Consulta 1: usado_por == sanitizedEmail
+      let q1 = query(codigosRef, where('usado_por', '==', sanitizedEmail));
+      let querySnapshot = await getDocs(q1);
 
-      // Consulta 2: Si el original tenía mayúsculas y no arrojó resultados
+      // Consulta 2: usadoPor == sanitizedEmail (camelCase)
+      if (querySnapshot.empty) {
+        let q2 = query(codigosRef, where('usadoPor', '==', sanitizedEmail));
+        querySnapshot = await getDocs(q2);
+      }
+
+      // Consulta 3: Si el original tenía mayúsculas y no arrojó resultados
       if (querySnapshot.empty && userEmail.trim() !== sanitizedEmail) {
-        q = query(codigosRef, where('usado_por', '==', userEmail.trim()));
-        querySnapshot = await getDocs(q);
+        let q3 = query(codigosRef, where('usado_por', '==', userEmail.trim()));
+        querySnapshot = await getDocs(q3);
+        if (querySnapshot.empty) {
+          let q4 = query(codigosRef, where('usadoPor', '==', userEmail.trim()));
+          querySnapshot = await getDocs(q4);
+        }
       }
 
       if (!querySnapshot.empty) {
@@ -242,8 +251,9 @@ export async function checkUserExistingLicense(userEmail: string): Promise<Codig
           codigo: data.codigo || firstDoc.id,
           canjeado: true,
           usado_por: sanitizedEmail,
-          fecha_canje: data.fecha_canje ? (data.fecha_canje.toDate ? data.fecha_canje.toDate().toISOString() : data.fecha_canje) : null
+          fecha_canje: data.fecha_canje ? (data.fecha_canje.toDate ? data.fecha_canje.toDate().toISOString() : data.fecha_canje) : (data.fechaCanje || null)
         };
+        localStorage.setItem('bmc_acceso_autorizado', sanitizedEmail);
         localStorage.setItem('101_active_license', JSON.stringify(license));
         return license;
       }
@@ -254,8 +264,12 @@ export async function checkUserExistingLicense(userEmail: string): Promise<Codig
 
   // 3. Comprobar registro local persistido
   const codes = getLocalCodes();
-  const found = codes.find(c => c.usado_por && c.usado_por.toLowerCase().trim() === sanitizedEmail);
+  const found = codes.find(c => 
+    (c.usado_por && c.usado_por.toLowerCase().trim() === sanitizedEmail) ||
+    ((c as any).usadoPor && (c as any).usadoPor.toLowerCase().trim() === sanitizedEmail)
+  );
   if (found) {
+    localStorage.setItem('bmc_acceso_autorizado', sanitizedEmail);
     localStorage.setItem('101_active_license', JSON.stringify(found));
     return found;
   }
@@ -385,8 +399,8 @@ export async function redeemAccessCode(
   inputCode: string, 
   userEmail: string
 ): Promise<{ success: boolean; message: string; license?: CodigoDocument }> {
-  const sanitizedCode = inputCode.trim();
-  if (!sanitizedCode) {
+  const codigoLimpio = inputCode.trim().toUpperCase();
+  if (!codigoLimpio) {
     return { success: false, message: 'Por favor ingresa un código de acceso válido.' };
   }
 
@@ -394,20 +408,34 @@ export async function redeemAccessCode(
   if (!realGoogleEmail || !realGoogleEmail.includes('@')) {
     return {
       success: false,
-      message: 'No hay un usuario autenticado con Google. Inicia sesión con tu cuenta de Google para canjear este código.'
+      message: 'Ingresa tu correo electrónico real para vincular tu licencia a tu cuenta.'
     };
   }
 
   if (db) {
     try {
-      const docSnap = await findCodigoDocument(sanitizedCode);
+      // 1. Consultar documento directo en Firestore: doc(db, "codigos", codigoLimpio)
+      let docSnap: any = null;
+      try {
+        const directSnap = await getDoc(doc(db, 'codigos', codigoLimpio));
+        if (directSnap.exists()) {
+          docSnap = directSnap;
+        }
+      } catch (errDoc) {
+        console.warn('[Firestore] Intento directo doc:', errDoc);
+      }
 
-      if (docSnap) {
+      // Si no se halló por ID exacto, buscar inteligentemente en colección
+      if (!docSnap) {
+        docSnap = await findCodigoDocument(codigoLimpio);
+      }
+
+      if (docSnap && docSnap.exists()) {
         const data = docSnap.data();
         const isCanjeado = data.canjeado === true;
-        const currentUsadoPor = typeof data.usado_por === 'string' ? data.usado_por.toLowerCase().trim() : '';
+        const currentUsadoPor = (data.usado_por || data.usadoPor || '').toString().toLowerCase().trim();
 
-        // Si ya está canjeado: comprobar si pertenece al mismo usuario
+        // 3. Si canjeado === true: verificar si coincide con el correo del usuario
         if (isCanjeado) {
           if (currentUsadoPor === realGoogleEmail) {
             const license: CodigoDocument = {
@@ -415,8 +443,9 @@ export async function redeemAccessCode(
               codigo: data.codigo || docSnap.id,
               canjeado: true,
               usado_por: realGoogleEmail,
-              fecha_canje: data.fecha_canje?.toDate ? data.fecha_canje.toDate().toISOString() : data.fecha_canje
+              fecha_canje: data.fecha_canje || data.fechaCanje || null
             };
+            localStorage.setItem('bmc_acceso_autorizado', realGoogleEmail);
             localStorage.setItem('101_active_license', JSON.stringify(license));
             return {
               success: true,
@@ -430,26 +459,39 @@ export async function redeemAccessCode(
           };
         }
 
-        // Marcar como canjeado en Firestore ESTRICTAMENTE con realGoogleEmail
+        // 4. Si canjeado === false y activo === true (o no restringido)
+        if (data.activo === false) {
+          return {
+            success: false,
+            message: 'Este código no está activo actualmente.'
+          };
+        }
+
         const docRef = doc(db, 'codigos', docSnap.id);
+        const fechaCanjeActual = new Date().toLocaleString();
+        
         await updateDoc(docRef, {
           canjeado: true,
           usado_por: realGoogleEmail,
-          fecha_canje: serverTimestamp()
+          usadoPor: realGoogleEmail,
+          fecha_canje: fechaCanjeActual
         });
 
         const newLicense: CodigoDocument = {
           id: docSnap.id,
-          codigo: data.codigo || sanitizedCode.toUpperCase(),
+          codigo: data.codigo || codigoLimpio,
           canjeado: true,
           usado_por: realGoogleEmail,
-          fecha_canje: new Date().toISOString()
+          fecha_canje: fechaCanjeActual
         };
+
+        // 5. Guardar bmc_acceso_autorizado y abrir contenido de inmediato
+        localStorage.setItem('bmc_acceso_autorizado', realGoogleEmail);
+        localStorage.setItem('101_active_license', JSON.stringify(newLicense));
 
         const localCodes = getLocalCodes();
         localCodes.push(newLicense);
         saveLocalCodes(localCodes);
-        localStorage.setItem('101_active_license', JSON.stringify(newLicense));
 
         return {
           success: true,
@@ -468,9 +510,9 @@ export async function redeemAccessCode(
 
   // Respaldo local si existía en base local
   const codes = getLocalCodes();
-  const clean = sanitizedCode.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const clean = codigoLimpio.replace(/[^A-Z0-9]/g, '');
   const codeIndex = codes.findIndex(c => 
-    c.codigo.toUpperCase() === sanitizedCode.toUpperCase() || 
+    c.codigo.toUpperCase() === codigoLimpio || 
     c.codigo.toUpperCase().replace(/[^A-Z0-9]/g, '') === clean
   );
 
@@ -482,14 +524,16 @@ export async function redeemAccessCode(
         message: 'Este código ya ha sido canjeado por otra cuenta.'
       };
     }
+    const fechaCanjeActual = new Date().toLocaleString();
     const updatedLicense: CodigoDocument = {
       ...existing,
       canjeado: true,
       usado_por: realGoogleEmail,
-      fecha_canje: new Date().toISOString()
+      fecha_canje: fechaCanjeActual
     };
     codes[codeIndex] = updatedLicense;
     saveLocalCodes(codes);
+    localStorage.setItem('bmc_acceso_autorizado', realGoogleEmail);
     localStorage.setItem('101_active_license', JSON.stringify(updatedLicense));
     return {
       success: true,

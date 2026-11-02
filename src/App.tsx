@@ -23,9 +23,48 @@ import { CodeRedemptionModal } from './components/CodeRedemptionModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
 
 export default function App() {
-  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
-  const [isAuthLoading, setIsAuthLoading] = useState(true);
-  const [activeLicense, setActiveLicense] = useState<CodigoDocument | null>(null);
+  // 1. Al abrir la aplicación, revisa si existe localStorage.getItem('bmc_acceso_autorizado')
+  const [isAuthorized, setIsAuthorized] = useState<boolean>(() => {
+    return !!localStorage.getItem('bmc_acceso_autorizado');
+  });
+
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
+    const authorizedEmail = localStorage.getItem('bmc_acceso_autorizado');
+    if (authorizedEmail) {
+      const savedUser = localStorage.getItem('101_direct_user');
+      if (savedUser) {
+        try { return JSON.parse(savedUser); } catch {}
+      }
+      return {
+        uid: `user-${authorizedEmail.replace(/[^a-zA-Z0-9]/g, '_')}`,
+        email: authorizedEmail,
+        displayName: authorizedEmail.split('@')[0] || 'Lector Oficial',
+        photoURL: null,
+        emailVerified: true
+      };
+    }
+    return null;
+  });
+
+  const [activeLicense, setActiveLicense] = useState<CodigoDocument | null>(() => {
+    const saved = localStorage.getItem('101_active_license');
+    if (saved) {
+      try { return JSON.parse(saved); } catch {}
+    }
+    const authorizedEmail = localStorage.getItem('bmc_acceso_autorizado');
+    if (authorizedEmail) {
+      return {
+        id: 'AUTH_PREV',
+        codigo: 'ACCESO_AUTORIZADO',
+        canjeado: true,
+        usado_por: authorizedEmail,
+        fecha_canje: null
+      };
+    }
+    return null;
+  });
+
+  const [isAuthLoading, setIsAuthLoading] = useState(!localStorage.getItem('bmc_acceso_autorizado'));
   const [isCheckingLicense, setIsCheckingLicense] = useState(false);
   const [needsCodeRedemption, setNeedsCodeRedemption] = useState(false);
 
@@ -38,52 +77,56 @@ export default function App() {
   // Escuchar estado de autenticación con Firebase
   useEffect(() => {
     const unsubscribe = subscribeToAuthChanges(async (user) => {
-      setCurrentUser(user);
       setIsAuthLoading(false);
 
       if (user && user.email) {
-        // Verificar si la cuenta de Google ya tenía el libro canjeado anteriormente
+        const cleanEmail = user.email.toLowerCase().trim();
+        setCurrentUser(user);
+
+        // Si ya está autorizado con este correo, mantener el acceso directo
+        const currentAuthorized = localStorage.getItem('bmc_acceso_autorizado');
+        if (currentAuthorized && currentAuthorized.toLowerCase().trim() === cleanEmail) {
+          setIsAuthorized(true);
+          setNeedsCodeRedemption(false);
+          return;
+        }
+
+        // Consultar colección 'codigos' en Firestore para comprobar si algún doc tiene usado_por o usadoPor == user.email
         setIsCheckingLicense(true);
         try {
-          const existingLicense = await checkUserExistingLicense(user.email);
+          const existingLicense = await checkUserExistingLicense(cleanEmail);
           if (existingLicense) {
-            // Usuario con código previo: pasa directamente al reproductor
+            localStorage.setItem('bmc_acceso_autorizado', cleanEmail);
             setActiveLicense(existingLicense);
+            setIsAuthorized(true);
             setNeedsCodeRedemption(false);
           } else {
-            // Usuario nuevo: mostrar formulario para ingresar código de acceso
-            setActiveLicense(null);
-            setNeedsCodeRedemption(true);
+            // Si no tiene código canjeado a su nombre y no estaba previamente autorizado
+            if (!localStorage.getItem('bmc_acceso_autorizado')) {
+              setActiveLicense(null);
+              setIsAuthorized(false);
+              setNeedsCodeRedemption(true);
+            }
           }
         } catch (err) {
           console.warn('[Acceso] Consulta de licencia:', err);
-          setNeedsCodeRedemption(true);
+          if (!localStorage.getItem('bmc_acceso_autorizado')) {
+            setNeedsCodeRedemption(true);
+          }
         } finally {
           setIsCheckingLicense(false);
         }
       } else {
-        const savedLicense = localStorage.getItem('101_active_license');
-        const savedUser = localStorage.getItem('101_direct_user');
-        if (savedLicense) {
-          try {
-            const license = JSON.parse(savedLicense);
-            if (license && license.usado_por && license.usado_por.includes('@')) {
-              const directUser = savedUser ? JSON.parse(savedUser) : {
-                uid: `google-${license.usado_por}`,
-                email: license.usado_por,
-                displayName: 'Lector Oficial',
-                photoURL: null,
-                emailVerified: true
-              };
-              setActiveLicense(license);
-              setCurrentUser(directUser);
-              setNeedsCodeRedemption(false);
-              return;
-            }
-          } catch {}
+        const authorizedEmail = localStorage.getItem('bmc_acceso_autorizado');
+        if (authorizedEmail) {
+          setIsAuthorized(true);
+          setNeedsCodeRedemption(false);
+        } else {
+          setIsAuthorized(false);
+          setCurrentUser(null);
+          setActiveLicense(null);
+          setNeedsCodeRedemption(false);
         }
-        setActiveLicense(null);
-        setNeedsCodeRedemption(false);
       }
     });
 
@@ -97,15 +140,21 @@ export default function App() {
       const user = await loginWithGoogle();
       setCurrentUser(user);
       if (user && user.email) {
+        const cleanEmail = user.email.toLowerCase().trim();
         setIsCheckingLicense(true);
         try {
-          const existingLicense = await checkUserExistingLicense(user.email);
+          const existingLicense = await checkUserExistingLicense(cleanEmail);
           if (existingLicense) {
+            localStorage.setItem('bmc_acceso_autorizado', cleanEmail);
             setActiveLicense(existingLicense);
+            setIsAuthorized(true);
             setNeedsCodeRedemption(false);
           } else {
-            setActiveLicense(null);
-            setNeedsCodeRedemption(true);
+            if (!localStorage.getItem('bmc_acceso_autorizado')) {
+              setActiveLicense(null);
+              setIsAuthorized(false);
+              setNeedsCodeRedemption(true);
+            }
           }
         } finally {
           setIsCheckingLicense(false);
@@ -118,30 +167,39 @@ export default function App() {
   };
 
   const handleDirectCodeAccess = (license: CodigoDocument, user: UserProfile) => {
+    localStorage.setItem('bmc_acceso_autorizado', user.email);
     localStorage.setItem('101_active_license', JSON.stringify(license));
     localStorage.setItem('101_direct_user', JSON.stringify(user));
     setActiveLicense(license);
     setCurrentUser(user);
+    setIsAuthorized(true);
     setNeedsCodeRedemption(false);
   };
 
   const handleLogout = async () => {
     await logoutUser();
+    localStorage.removeItem('bmc_acceso_autorizado');
     localStorage.removeItem('101_active_license');
     localStorage.removeItem('101_direct_user');
+    setIsAuthorized(false);
     setCurrentUser(null);
     setActiveLicense(null);
     setNeedsCodeRedemption(false);
   };
 
   const handleCodeRedeemed = (license: CodigoDocument) => {
+    const userEmail = license.usado_por || currentUser?.email || '';
+    if (userEmail) {
+      localStorage.setItem('bmc_acceso_autorizado', userEmail);
+    }
     localStorage.setItem('101_active_license', JSON.stringify(license));
     setActiveLicense(license);
+    setIsAuthorized(true);
     setNeedsCodeRedemption(false);
   };
 
-  // Pantalla de carga inicial
-  if (isAuthLoading) {
+  // 1. Pantalla de carga inicial (solo si no estaba autorizado previamente en localStorage)
+  if (isAuthLoading && !isAuthorized) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-4" style={{ background: 'linear-gradient(135deg, #4f96fe 0%, #1e5ad9 100%)' }}>
         <div className="w-16 h-16 rounded-full p-1 bg-white shadow-xl animate-pulse flex items-center justify-center">
@@ -154,18 +212,8 @@ export default function App() {
     );
   }
 
-  // 1. Pantalla Inicial: Si no tiene acceso activo -> Mostrar LoginScreen
-  if (!currentUser) {
-    return (
-      <>
-        <LoginScreen onLogin={handleLogin} onDirectCodeAccess={handleDirectCodeAccess} />
-        <OfflineIndicator />
-      </>
-    );
-  }
-
-  // Estado intermedio mientras se consulta Firestore
-  if (isCheckingLicense) {
+  // 2. Estado intermedio mientras se consulta Firestore (solo si no estaba autorizado)
+  if (isCheckingLicense && !isAuthorized) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-4 text-center" style={{ background: 'linear-gradient(135deg, #4f96fe 0%, #1e5ad9 100%)' }}>
         <div className="glass-card rounded-3xl p-8 max-w-sm mx-auto flex flex-col items-center">
@@ -174,15 +222,25 @@ export default function App() {
             Verificando acceso...
           </h2>
           <p className="text-xs text-slate-500 font-medium">
-            {currentUser.email}
+            {currentUser?.email}
           </p>
         </div>
       </div>
     );
   }
 
-  // 2. Si no tiene código previo -> Mostrar Modal Limpio [ Ingresa tu código de acceso ] y [ Desbloquear audiolibro ]
-  if (needsCodeRedemption || !activeLicense) {
+  // 3. Si no tiene acceso activo ni usuario -> Mostrar LoginScreen
+  if (!isAuthorized && !currentUser) {
+    return (
+      <>
+        <LoginScreen onLogin={handleLogin} onDirectCodeAccess={handleDirectCodeAccess} />
+        <OfflineIndicator />
+      </>
+    );
+  }
+
+  // 4. Si el usuario está autenticado pero necesita canjear código
+  if (!isAuthorized && (needsCodeRedemption || !activeLicense) && currentUser) {
     return (
       <>
         <CodeRedemptionModal
@@ -195,20 +253,25 @@ export default function App() {
     );
   }
 
-  // 3. Usuario con acceso verificado -> Reproductor de Audiolibro y Lector de Libro Digital
+  // 5. Usuario autorizado (o con código canjeado) -> Desbloquear contenido de inmediato
   return (
     <div className="min-h-screen text-[#0f2147] flex flex-col selection:bg-[#7c3aed]/20 selection:text-[#7c3aed]">
       
       {/* Barra de Navegación */}
       <Navbar
-        user={currentUser}
+        user={currentUser || {
+          uid: 'autorizado',
+          email: localStorage.getItem('bmc_acceso_autorizado') || '',
+          displayName: 'Lector Oficial',
+          photoURL: null,
+          emailVerified: true
+        }}
         activeTab={activeTab}
         onTabChange={setActiveTab}
         onLogout={handleLogout}
-        licenseCode={activeLicense.codigo}
+        licenseCode={activeLicense?.codigo || 'OFICIAL'}
       />
 
-      {/* Contenido Principal Desbloqueado */}
       {/* Contenido Principal Desbloqueado: Dos Secciones Independientes */}
       <main className="flex-1 flex flex-col">
         {activeTab === 'audio' && (
@@ -217,7 +280,7 @@ export default function App() {
               chapters={BOOK_CHAPTERS}
               currentChapterIndex={currentChapterIndex}
               onChapterSelect={setCurrentChapterIndex}
-              userEmail={currentUser.email}
+              userEmail={currentUser?.email || localStorage.getItem('bmc_acceso_autorizado') || ''}
               isSideBySide={false}
             />
           </div>
@@ -226,7 +289,7 @@ export default function App() {
         {activeTab === 'book' && (
           <div className="flex-1 flex flex-col py-3 sm:py-6">
             <BookReader
-              userEmail={currentUser.email}
+              userEmail={currentUser?.email || localStorage.getItem('bmc_acceso_autorizado') || ''}
               isSideBySide={false}
             />
           </div>

@@ -7,11 +7,11 @@ service cloud.firestore {
     match /codigos/{codigoId} {
       // Permitir leer códigos no canjeados o aquellos pertenecientes al usuario
       allow get: if (resource.data.canjeado == false) ||
-        (request.auth != null && resource.data.usado_por == request.auth.token.email);
+        (request.auth != null && (resource.data.usado_por == request.auth.token.email || resource.data.usadoPor == request.auth.token.email));
 
       // Permitir listar códigos
       allow list: if (resource.data.canjeado == false) ||
-        (request.auth != null && resource.data.usado_por == request.auth.token.email);
+        (request.auth != null && (resource.data.usado_por == request.auth.token.email || resource.data.usadoPor == request.auth.token.email));
 
       // Quema y canje de código
       allow update: if resource.data.canjeado == false &&
