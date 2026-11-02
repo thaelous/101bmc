@@ -1,26 +1,23 @@
 /**
  * Módulo de Almacenamiento Seguro Local (Offline Audio Vault)
- * Utiliza IndexedDB y la API nativa Web Crypto con cifrado AES-GCM de 256 bits.
+ * Base de datos IndexedDB: "bmc_audio_offline"
+ * Algoritmo: Web Crypto API nativa AES-GCM (256 bits)
+ * Clave: Derivada criptográficamente del identificador/correo del usuario en localStorage.
  * 
- * Reglas de seguridad:
- * - Los audios se descargan en memoria y se cifran inmediatamente.
- * - En IndexedDB únicamente se guardan buffers cifrados (ciphertext + IV).
- * - No se expone el archivo .mp3 sin cifrar ni se guarda en el sistema de archivos del usuario.
- * - Cuando no hay conexión o se reproduce un capítulo guardado, se descifra al vuelo en memoria
- *   mediante un Blob URL temporal efímero.
+ * Cumplimiento estricto:
+ * - Nunca descarga archivos a la carpeta de descargas del usuario ni expone el .mp3 suelto.
+ * - Solo almacena datos binarios cifrados en IndexedDB.
+ * - Desencripta al vuelo en memoria RAM mediante Blob y URL.createObjectURL para reproducir sin conexión.
  */
 
-const DB_NAME = 'bmc_offline_audio_vault_v1';
+const DB_NAME = 'bmc_audio_offline';
 const DB_VERSION = 1;
 const STORE_CHAPTERS = 'encrypted_chapters';
-const STORE_KEYS = 'vault_security_keys';
-const MASTER_KEY_ID = 'bmc_aes_master_key';
 
-let cachedCryptoKey: CryptoKey | null = null;
 let dbInstance: IDBDatabase | null = null;
 
 /**
- * Inicializa y abre la base de datos IndexedDB
+ * Abre o inicializa la base de datos "bmc_audio_offline"
  */
 function openVaultDB(): Promise<IDBDatabase> {
   if (dbInstance) return Promise.resolve(dbInstance);
@@ -35,13 +32,8 @@ function openVaultDB(): Promise<IDBDatabase> {
 
     request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
       const db = (event.target as IDBOpenDBRequest).result;
-
       if (!db.objectStoreNames.contains(STORE_CHAPTERS)) {
         db.createObjectStore(STORE_CHAPTERS, { keyPath: 'chapterNumber' });
-      }
-
-      if (!db.objectStoreNames.contains(STORE_KEYS)) {
-        db.createObjectStore(STORE_KEYS, { keyPath: 'id' });
       }
     };
 
@@ -57,67 +49,30 @@ function openVaultDB(): Promise<IDBDatabase> {
 }
 
 /**
- * Obtiene o genera la llave simétrica AES-GCM (256 bits) para este dispositivo.
- * La llave cruda se guarda protegida en el store privado de IndexedDB y nunca sale del navegador.
+ * Deriva la CryptoKey AES-GCM (256 bits) utilizando el identificador o correo
+ * del usuario almacenado en localStorage ('bmc_acceso_autorizado').
  */
-async function getMasterCryptoKey(): Promise<CryptoKey> {
-  if (cachedCryptoKey) return cachedCryptoKey;
-
-  const db = await openVaultDB();
-
-  // Intentar leer la llave existente
-  const existingKeyBytes = await new Promise<Uint8Array | null>((resolve, reject) => {
-    const tx = db.transaction(STORE_KEYS, 'readonly');
-    const store = tx.objectStore(STORE_KEYS);
-    const req = store.get(MASTER_KEY_ID);
-
-    req.onsuccess = () => {
-      if (req.result && req.result.keyBytes) {
-        resolve(req.result.keyBytes);
-      } else {
-        resolve(null);
-      }
-    };
-
-    req.onerror = () => reject(req.error);
-  });
-
-  if (existingKeyBytes) {
-    // Importar llave existente a formato CryptoKey AES-GCM
-    cachedCryptoKey = await window.crypto.subtle.importKey(
-      'raw',
-      existingKeyBytes as unknown as BufferSource,
-      { name: 'AES-GCM', length: 256 },
-      false,
-      ['encrypt', 'decrypt']
-    );
-    return cachedCryptoKey;
+async function getUserCryptoKey(userEmailOrId?: string): Promise<CryptoKey> {
+  let identifier: string | null | undefined = userEmailOrId;
+  if (!identifier && typeof localStorage !== 'undefined') {
+    identifier = localStorage.getItem('bmc_acceso_autorizado') || localStorage.getItem('bmc_usuario_actual') || undefined;
+  }
+  if (!identifier) {
+    identifier = 'bmc_lector_autorizado_vault';
   }
 
-  // Generar nueva semilla criptográfica segura de 256 bits (32 bytes)
-  const newRawKeyBytes = new Uint8Array(32);
-  window.crypto.getRandomValues(newRawKeyBytes);
+  // Obtenemos un hash SHA-256 (32 bytes = 256 bits) del identificador de sesión
+  const enc = new TextEncoder();
+  const keyMaterial = enc.encode(identifier.trim().toLowerCase() + '_bmc_secure_offline_salt');
+  const hashBuffer = await window.crypto.subtle.digest('SHA-256', keyMaterial);
 
-  // Guardar en IndexedDB
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE_KEYS, 'readwrite');
-    const store = tx.objectStore(STORE_KEYS);
-    const req = store.put({ id: MASTER_KEY_ID, keyBytes: newRawKeyBytes, createdAt: Date.now() });
-
-    req.onsuccess = () => resolve();
-    req.onerror = () => reject(req.error);
-  });
-
-  // Importar para uso activo
-  cachedCryptoKey = await window.crypto.subtle.importKey(
+  return window.crypto.subtle.importKey(
     'raw',
-    newRawKeyBytes,
+    hashBuffer,
     { name: 'AES-GCM', length: 256 },
     false,
     ['encrypt', 'decrypt']
   );
-
-  return cachedCryptoKey;
 }
 
 export interface EncryptedChapterRecord {
@@ -132,7 +87,7 @@ export interface EncryptedChapterRecord {
 }
 
 /**
- * Verifica si un capítulo específico está guardado y cifrado en el almacén local
+ * Verifica si un capítulo específico existe en la base de datos "bmc_audio_offline"
  */
 export async function isChapterOfflineAvailable(chapterNumber: number): Promise<boolean> {
   try {
@@ -146,13 +101,13 @@ export async function isChapterOfflineAvailable(chapterNumber: number): Promise<
       req.onerror = () => resolve(false);
     });
   } catch (err) {
-    console.warn('[OfflineVault] Error al verificar capítulo:', err);
+    console.warn('[OfflineVault] Error al verificar capítulo en bmc_audio_offline:', err);
     return false;
   }
 }
 
 /**
- * Obtiene el listado de números de capítulos disponibles sin conexión
+ * Obtiene la lista completa de números de capítulos guardados en "bmc_audio_offline"
  */
 export async function getAllOfflineChapterNumbers(): Promise<number[]> {
   try {
@@ -175,25 +130,26 @@ export async function getAllOfflineChapterNumbers(): Promise<number[]> {
 }
 
 /**
- * Descarga el audio desde la URL de Firebase Storage, lo fragmenta y cifra en memoria con AES-GCM
- * y lo almacena protegido en IndexedDB.
+ * Descarga el archivo de audio en binario, lo encripta en memoria con AES-GCM
+ * y lo guarda en la base de datos IndexedDB "bmc_audio_offline".
  */
 export async function saveChapterForOffline(
   chapterNumber: number,
   title: string,
   filename: string,
   audioUrl: string,
-  onProgress?: (progressPercent: number) => void
+  onProgress?: (progressPercent: number) => void,
+  userEmailOrId?: string
 ): Promise<void> {
   const db = await openVaultDB();
-  const key = await getMasterCryptoKey();
+  const key = await getUserCryptoKey(userEmailOrId);
 
-  if (onProgress) onProgress(10);
+  if (onProgress) onProgress(15);
 
-  // 1. Descargar el stream de audio como ArrayBuffer binario
+  // 1. Descarga binaria del archivo .mp3 (ArrayBuffer / Blob en memoria)
   const response = await fetch(audioUrl, { mode: 'cors' });
   if (!response.ok) {
-    throw new Error(`Error HTTP ${response.status} al descargar el archivo de audio.`);
+    throw new Error(`Error ${response.status} al descargar audio para almacenamiento offline.`);
   }
 
   const contentLength = Number(response.headers.get('content-length')) || 0;
@@ -211,7 +167,7 @@ export async function saveChapterForOffline(
         chunks.push(value);
         receivedBytes += value.length;
         if (onProgress) {
-          const pct = Math.min(85, Math.round(10 + (receivedBytes / contentLength) * 75));
+          const pct = Math.min(85, Math.round(15 + (receivedBytes / contentLength) * 70));
           onProgress(pct);
         }
       }
@@ -225,24 +181,23 @@ export async function saveChapterForOffline(
     }
     audioBuffer = merged.buffer;
   } else {
-    if (onProgress) onProgress(50);
+    if (onProgress) onProgress(60);
     audioBuffer = await response.arrayBuffer();
   }
 
   if (onProgress) onProgress(90);
 
-  // 2. Generar vector de inicialización (IV) de 12 bytes aleatorios para AES-GCM
+  // 2. Encriptación nativa en memoria con AES-GCM
   const iv = new Uint8Array(12);
   window.crypto.getRandomValues(iv);
 
-  // 3. Cifrar los bytes en memoria con AES-GCM (256-bit)
   const encryptedBuffer = await window.crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
+    { name: 'AES-GCM', iv: iv as unknown as BufferSource },
     key,
     audioBuffer
   );
 
-  // 4. Guardar el registro cifrado en IndexedDB
+  // 3. Guardado seguro dentro de IndexedDB "bmc_audio_offline"
   const record: EncryptedChapterRecord = {
     chapterNumber,
     title,
@@ -267,13 +222,16 @@ export async function saveChapterForOffline(
 }
 
 /**
- * Lee el archivo cifrado de IndexedDB, lo descifra en memoria usando la CryptoKey local
- * y genera una URL temporal de Blob (URL.createObjectURL) para el reproductor nativo.
+ * Desencripta en memoria los datos almacenados en "bmc_audio_offline" al vuelo
+ * y crea una URL temporal con URL.createObjectURL para reproducir sin conexión.
  */
-export async function getDecryptedChapterAudioUrl(chapterNumber: number): Promise<string | null> {
+export async function getDecryptedChapterAudioUrl(
+  chapterNumber: number,
+  userEmailOrId?: string
+): Promise<string | null> {
   try {
     const db = await openVaultDB();
-    const key = await getMasterCryptoKey();
+    const key = await getUserCryptoKey(userEmailOrId);
 
     const record = await new Promise<EncryptedChapterRecord | null>((resolve, reject) => {
       const tx = db.transaction(STORE_CHAPTERS, 'readonly');
@@ -288,7 +246,7 @@ export async function getDecryptedChapterAudioUrl(chapterNumber: number): Promis
       return null;
     }
 
-    // Descifrar con AES-GCM
+    // Desencriptar datos con AES-GCM
     const decryptedBuffer = await window.crypto.subtle.decrypt(
       { name: 'AES-GCM', iv: record.iv as unknown as BufferSource },
       key,
@@ -298,13 +256,13 @@ export async function getDecryptedChapterAudioUrl(chapterNumber: number): Promis
     const blob = new Blob([decryptedBuffer], { type: record.mimeType || 'audio/mpeg' });
     return URL.createObjectURL(blob);
   } catch (err) {
-    console.warn(`[OfflineVault] Error al descifrar capítulo ${chapterNumber}:`, err);
+    console.warn(`[OfflineVault] Error al desencriptar capítulo ${chapterNumber}:`, err);
     return null;
   }
 }
 
 /**
- * Elimina un capítulo específico del almacén offline
+ * Elimina un capítulo de "bmc_audio_offline"
  */
 export async function deleteOfflineChapter(chapterNumber: number): Promise<void> {
   const db = await openVaultDB();
@@ -316,30 +274,4 @@ export async function deleteOfflineChapter(chapterNumber: number): Promise<void>
     req.onsuccess = () => resolve();
     req.onerror = () => reject(req.error);
   });
-}
-
-/**
- * Obtiene el resumen de almacenamiento ocupado por los audios cifrados
- */
-export async function getOfflineStorageSummary(): Promise<{ totalBytes: number; count: number }> {
-  try {
-    const db = await openVaultDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_CHAPTERS, 'readonly');
-      const store = tx.objectStore(STORE_CHAPTERS);
-      const req = store.getAll();
-
-      req.onsuccess = () => {
-        const records = (req.result || []) as EncryptedChapterRecord[];
-        const totalBytes = records.reduce((acc, curr) => acc + (curr.sizeBytes || 0), 0);
-        resolve({
-          totalBytes,
-          count: records.length
-        });
-      };
-      req.onerror = () => reject(req.error);
-    });
-  } catch {
-    return { totalBytes: 0, count: 0 };
-  }
 }
