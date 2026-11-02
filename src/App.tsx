@@ -74,42 +74,11 @@ export default function App() {
   const [isCheckingLicense, setIsCheckingLicense] = useState(false);
   const [needsCodeRedemption, setNeedsCodeRedemption] = useState(false);
 
-  // Pestaña activa: guardada en localStorage para abrir exactamente donde se quedó ('audio' o 'book')
-  const [activeTab, setActiveTab] = useState<'audio' | 'book'>(() => {
-    try {
-      const savedTab = localStorage.getItem('bmc_ultima_pestana_activa');
-      if (savedTab === 'audio' || savedTab === 'book') return savedTab;
-    } catch {}
-    return 'audio';
-  });
+  // Pestaña activa ('audio' por defecto: dos secciones independientes Audiolibro y Libro Digital)
+  const [activeTab, setActiveTab] = useState<'audio' | 'book'>('audio');
   
-  // Selección del último capítulo escuchado del audiolibro
-  const [currentChapterIndex, setCurrentChapterIndex] = useState<number>(() => {
-    try {
-      const savedChapter = localStorage.getItem('bmc_ultimo_capitulo_audio');
-      if (savedChapter !== null) {
-        const idx = parseInt(savedChapter, 10);
-        if (!isNaN(idx) && idx >= 0 && idx < 113) {
-          return idx;
-        }
-      }
-    } catch {}
-    return 0;
-  });
-
-  const handleTabChange = (tab: 'audio' | 'book') => {
-    setActiveTab(tab);
-    try {
-      localStorage.setItem('bmc_ultima_pestana_activa', tab);
-    } catch {}
-  };
-
-  const handleChapterSelect = (index: number) => {
-    setCurrentChapterIndex(index);
-    try {
-      localStorage.setItem('bmc_ultimo_capitulo_audio', index.toString());
-    } catch {}
-  };
+  // Selección de capítulo
+  const [currentChapterIndex, setCurrentChapterIndex] = useState(0);
 
   // Escuchar estado de autenticación con Firebase y capturar redirección
   useEffect(() => {
@@ -316,7 +285,7 @@ export default function App() {
           emailVerified: true
         }}
         activeTab={activeTab}
-        onTabChange={handleTabChange}
+        onTabChange={setActiveTab}
         onLogout={handleLogout}
         licenseCode={activeLicense?.codigo || 'OFICIAL'}
       />
@@ -328,7 +297,7 @@ export default function App() {
             <AudioPlayer
               chapters={BOOK_CHAPTERS}
               currentChapterIndex={currentChapterIndex}
-              onChapterSelect={handleChapterSelect}
+              onChapterSelect={setCurrentChapterIndex}
               userEmail={currentUser?.email || localStorage.getItem('bmc_acceso_autorizado') || ''}
               isSideBySide={false}
             />
