@@ -11,7 +11,8 @@ import {
   loginWithGoogle, 
   logoutUser, 
   subscribeToAuthChanges, 
-  checkUserExistingLicense
+  checkUserExistingLicense,
+  handleGoogleRedirectResult
 } from './firebase/config';
 import { UserProfile, CodigoDocument } from './types';
 import { BOOK_CHAPTERS } from './data/bookContent';
@@ -23,22 +24,24 @@ import { CodeRedemptionModal } from './components/CodeRedemptionModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
 
 export default function App() {
-  // 1. Al abrir la aplicación, revisa si existe localStorage.getItem('bmc_acceso_autorizado')
+  // 1. Al cargar la página, revisa de inmediato: sesionGuardada = localStorage.getItem('bmc_acceso_autorizado')
+  // Si existe y no está vacía, desbloquea directamente la aplicación.
   const [isAuthorized, setIsAuthorized] = useState<boolean>(() => {
-    return !!localStorage.getItem('bmc_acceso_autorizado');
+    const sesionGuardada = localStorage.getItem('bmc_acceso_autorizado');
+    return !!(sesionGuardada && sesionGuardada.trim() !== '');
   });
 
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
-    const authorizedEmail = localStorage.getItem('bmc_acceso_autorizado');
-    if (authorizedEmail) {
+    const sesionGuardada = localStorage.getItem('bmc_acceso_autorizado');
+    if (sesionGuardada && sesionGuardada.trim() !== '') {
       const savedUser = localStorage.getItem('101_direct_user');
       if (savedUser) {
         try { return JSON.parse(savedUser); } catch {}
       }
       return {
-        uid: `user-${authorizedEmail.replace(/[^a-zA-Z0-9]/g, '_')}`,
-        email: authorizedEmail,
-        displayName: authorizedEmail.split('@')[0] || 'Lector Oficial',
+        uid: `user-${sesionGuardada.replace(/[^a-zA-Z0-9]/g, '_')}`,
+        email: sesionGuardada,
+        displayName: sesionGuardada.split('@')[0] || 'Lector Oficial',
         photoURL: null,
         emailVerified: true
       };
@@ -51,20 +54,23 @@ export default function App() {
     if (saved) {
       try { return JSON.parse(saved); } catch {}
     }
-    const authorizedEmail = localStorage.getItem('bmc_acceso_autorizado');
-    if (authorizedEmail) {
+    const sesionGuardada = localStorage.getItem('bmc_acceso_autorizado');
+    if (sesionGuardada && sesionGuardada.trim() !== '') {
       return {
         id: 'AUTH_PREV',
         codigo: 'ACCESO_AUTORIZADO',
         canjeado: true,
-        usado_por: authorizedEmail,
+        usado_por: sesionGuardada,
         fecha_canje: null
       };
     }
     return null;
   });
 
-  const [isAuthLoading, setIsAuthLoading] = useState(!localStorage.getItem('bmc_acceso_autorizado'));
+  const [isAuthLoading, setIsAuthLoading] = useState(() => {
+    const sesion = localStorage.getItem('bmc_acceso_autorizado');
+    return !(sesion && sesion.trim() !== '');
+  });
   const [isCheckingLicense, setIsCheckingLicense] = useState(false);
   const [needsCodeRedemption, setNeedsCodeRedemption] = useState(false);
 
@@ -74,24 +80,41 @@ export default function App() {
   // Selección de capítulo
   const [currentChapterIndex, setCurrentChapterIndex] = useState(0);
 
-  // Escuchar estado de autenticación con Firebase
+  // Escuchar estado de autenticación con Firebase y capturar redirección
   useEffect(() => {
+    // 1. Si hubo redirección desde Google Auth, procesar resultado
+    handleGoogleRedirectResult().then(async (redirectUser) => {
+      if (redirectUser && redirectUser.email) {
+        const cleanEmail = redirectUser.email.toLowerCase().trim();
+        setCurrentUser(redirectUser);
+        const existingLicense = await checkUserExistingLicense(cleanEmail);
+        if (existingLicense) {
+          localStorage.setItem('bmc_acceso_autorizado', cleanEmail);
+          setActiveLicense(existingLicense);
+          setIsAuthorized(true);
+          setNeedsCodeRedemption(false);
+        }
+      }
+    });
+
+    // 2. Suscripción a cambios de autenticación
     const unsubscribe = subscribeToAuthChanges(async (user) => {
       setIsAuthLoading(false);
+
+      // Si ya hay una sesión guardada autorizada, nunca bloquear al usuario
+      const sesionGuardada = localStorage.getItem('bmc_acceso_autorizado');
+      if (sesionGuardada && sesionGuardada.trim() !== '') {
+        setIsAuthorized(true);
+        setNeedsCodeRedemption(false);
+        if (user) setCurrentUser(user);
+        return;
+      }
 
       if (user && user.email) {
         const cleanEmail = user.email.toLowerCase().trim();
         setCurrentUser(user);
 
-        // Si ya está autorizado con este correo, mantener el acceso directo
-        const currentAuthorized = localStorage.getItem('bmc_acceso_autorizado');
-        if (currentAuthorized && currentAuthorized.toLowerCase().trim() === cleanEmail) {
-          setIsAuthorized(true);
-          setNeedsCodeRedemption(false);
-          return;
-        }
-
-        // Consultar colección 'codigos' en Firestore para comprobar si algún doc tiene usado_por o usadoPor == user.email
+        // Consultar colección 'codigos' en Firestore
         setIsCheckingLicense(true);
         try {
           const existingLicense = await checkUserExistingLicense(cleanEmail);
@@ -101,24 +124,19 @@ export default function App() {
             setIsAuthorized(true);
             setNeedsCodeRedemption(false);
           } else {
-            // Si no tiene código canjeado a su nombre y no estaba previamente autorizado
-            if (!localStorage.getItem('bmc_acceso_autorizado')) {
-              setActiveLicense(null);
-              setIsAuthorized(false);
-              setNeedsCodeRedemption(true);
-            }
+            setActiveLicense(null);
+            setIsAuthorized(false);
+            setNeedsCodeRedemption(true);
           }
         } catch (err) {
           console.warn('[Acceso] Consulta de licencia:', err);
-          if (!localStorage.getItem('bmc_acceso_autorizado')) {
-            setNeedsCodeRedemption(true);
-          }
+          setNeedsCodeRedemption(true);
         } finally {
           setIsCheckingLicense(false);
         }
       } else {
-        const authorizedEmail = localStorage.getItem('bmc_acceso_autorizado');
-        if (authorizedEmail) {
+        const sesion = localStorage.getItem('bmc_acceso_autorizado');
+        if (sesion && sesion.trim() !== '') {
           setIsAuthorized(true);
           setNeedsCodeRedemption(false);
         } else {

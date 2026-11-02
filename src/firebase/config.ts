@@ -11,6 +11,8 @@ import {
   getAuth, 
   GoogleAuthProvider, 
   signInWithPopup, 
+  signInWithRedirect,
+  getRedirectResult,
   signOut, 
   onAuthStateChanged,
   User as FirebaseUser
@@ -125,23 +127,69 @@ export const saveLocalCodes = (codes: CodigoDocument[]) => {
 export async function loginWithGoogle(): Promise<UserProfile> {
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
-  const result = await signInWithPopup(auth, provider);
-  const user = result.user;
 
-  if (!user || !user.email) {
-    throw new Error('No se pudo obtener el correo de la cuenta de Google seleccionada.');
+  try {
+    const result = await signInWithPopup(auth, provider);
+    const user = result.user;
+
+    if (!user || !user.email) {
+      throw new Error('No se pudo obtener el correo de la cuenta de Google seleccionada.');
+    }
+
+    const realGoogleEmail = user.email.toLowerCase().trim();
+    const profile: UserProfile = {
+      uid: user.uid,
+      email: realGoogleEmail,
+      displayName: user.displayName || 'Lector Oficial',
+      photoURL: user.photoURL,
+      emailVerified: user.emailVerified
+    };
+    localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(profile));
+    return profile;
+  } catch (popupErr: any) {
+    console.warn('[Firebase Auth] signInWithPopup aviso:', popupErr?.code || popupErr?.message);
+
+    const isPopupIssue = 
+      popupErr?.code === 'auth/popup-blocked' ||
+      popupErr?.code === 'auth/cancelled-popup-request' ||
+      popupErr?.code === 'auth/popup-closed-by-user' ||
+      popupErr?.code === 'auth/operation-not-supported-in-this-environment';
+
+    if (isPopupIssue) {
+      try {
+        console.info('[Firebase Auth] Redirigiendo automáticamente con signInWithRedirect...');
+        await signInWithRedirect(auth, provider);
+        return new Promise<UserProfile>(() => {});
+      } catch (redirectErr) {
+        console.warn('[Firebase Auth] signInWithRedirect falló:', redirectErr);
+        throw popupErr;
+      }
+    }
+
+    throw popupErr;
   }
+}
 
-  const realGoogleEmail = user.email.toLowerCase().trim();
-  const profile: UserProfile = {
-    uid: user.uid,
-    email: realGoogleEmail,
-    displayName: user.displayName || 'Lector Oficial',
-    photoURL: user.photoURL,
-    emailVerified: user.emailVerified
-  };
-  localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(profile));
-  return profile;
+export async function handleGoogleRedirectResult(): Promise<UserProfile | null> {
+  if (!auth) return null;
+  try {
+    const result = await getRedirectResult(auth);
+    if (result && result.user && result.user.email) {
+      const realGoogleEmail = result.user.email.toLowerCase().trim();
+      const profile: UserProfile = {
+        uid: result.user.uid,
+        email: realGoogleEmail,
+        displayName: result.user.displayName || 'Lector Oficial',
+        photoURL: result.user.photoURL,
+        emailVerified: result.user.emailVerified
+      };
+      localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(profile));
+      return profile;
+    }
+  } catch (err: any) {
+    console.warn('[Firebase Auth] Aviso getRedirectResult:', err?.message || err);
+  }
+  return null;
 }
 
 export async function logoutUser(): Promise<void> {

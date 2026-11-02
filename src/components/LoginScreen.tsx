@@ -37,6 +37,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   const [connectedUser, setConnectedUser] = useState<UserProfile | null>(null);
 
   const [isCheckingCode, setIsCheckingCode] = useState(false);
+  const [isCheckingDirectEmail, setIsCheckingDirectEmail] = useState(false);
   const [codeError, setCodeError] = useState<string | null>(null);
 
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -98,6 +99,53 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       setCodeError(err?.message || 'Error al validar el código en Firestore.');
     } finally {
       setIsCheckingCode(false);
+    }
+  };
+
+  // Acceso con un solo clic para usuarios que ya canjearon su código previamente
+  const handleDirectEmailLogin = async () => {
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
+      setCodeError('Por favor escribe tu correo electrónico para verificar tu acceso registrado.');
+      return;
+    }
+
+    setIsCheckingDirectEmail(true);
+    setCodeError(null);
+    setLoginError(null);
+
+    try {
+      const existingLicense = await checkUserExistingLicense(cleanEmail);
+      if (existingLicense) {
+        localStorage.setItem('bmc_acceso_autorizado', cleanEmail);
+        localStorage.setItem('101_user_email', cleanEmail);
+
+        confetti({
+          particleCount: 120,
+          spread: 80,
+          origin: { y: 0.6 },
+          colors: ['#7c3aed', '#4f96fe', '#10b981', '#ffffff']
+        });
+
+        const userProfile: UserProfile = connectedUser || {
+          uid: `user-${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}`,
+          email: cleanEmail,
+          displayName: cleanEmail.split('@')[0] || 'Lector Oficial',
+          photoURL: null,
+          emailVerified: true
+        };
+
+        if (onDirectCodeAccess) {
+          onDirectCodeAccess(existingLicense, userProfile);
+        }
+      } else {
+        setCodeError('No encontramos ningún código canjeado para este correo en Firestore. Si es tu primera vez, ingresa tu código de compra para activarlo.');
+      }
+    } catch (err: any) {
+      console.warn('[Login] Error al verificar correo registrado:', err);
+      setCodeError(err?.message || 'Error al conectar con Firestore para validar el acceso.');
+    } finally {
+      setIsCheckingDirectEmail(false);
     }
   };
 
@@ -365,9 +413,29 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                       setCodeError(null);
                     }}
                     placeholder="tu-correo@gmail.com"
-                    disabled={isCheckingCode || isLoggingIn}
+                    disabled={isCheckingCode || isLoggingIn || isCheckingDirectEmail}
                     className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border-2 border-slate-200 focus:border-[#7c3aed] focus:bg-white focus:outline-none text-xs sm:text-sm font-medium text-[#0f2147] placeholder:text-slate-400 transition"
                   />
+
+                  {/* Botón secundario limpio: Ya canjeé mi código (Entrar directo) */}
+                  <button
+                    type="button"
+                    onClick={handleDirectEmailLogin}
+                    disabled={isCheckingDirectEmail || isCheckingCode || isLoggingIn || !email.trim()}
+                    className="w-full mt-2 py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-[#7c3aed]/10 text-[#7c3aed] hover:text-[#6d28d9] text-xs font-bold border border-slate-200 hover:border-[#7c3aed]/40 flex items-center justify-center gap-2 transition active:scale-[0.99] disabled:opacity-50 shadow-xs"
+                  >
+                    {isCheckingDirectEmail ? (
+                      <span className="flex items-center gap-2">
+                        <span className="w-3.5 h-3.5 border-2 border-[#7c3aed] border-t-transparent rounded-full animate-spin" />
+                        <span>Verificando en Firestore...</span>
+                      </span>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-3.5 h-3.5 text-[#7c3aed]" />
+                        <span>Ya canjeé mi código (Entrar directo)</span>
+                      </>
+                    )}
+                  </button>
                 </div>
 
                 {/* Campo 2: Código de compra */}
