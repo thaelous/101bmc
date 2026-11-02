@@ -219,11 +219,12 @@ export async function checkUserExistingLicense(userEmail: string): Promise<Codig
     }
   } catch {}
 
+  // 2. Consulta en Firestore: indexada por usado_por, 100% compatible con firestore.rules
   if (db) {
     try {
       const codigosRef = collection(db, 'codigos');
       
-      // Consulta 1: Email saneado en minúsculas
+      // Consulta 1: Email en minúsculas
       let q = query(codigosRef, where('usado_por', '==', sanitizedEmail));
       let querySnapshot = await getDocs(q);
 
@@ -239,37 +240,19 @@ export async function checkUserExistingLicense(userEmail: string): Promise<Codig
         const license: CodigoDocument = {
           id: firstDoc.id,
           codigo: data.codigo || firstDoc.id,
-          canjeado: data.canjeado ?? true,
+          canjeado: true,
           usado_por: sanitizedEmail,
           fecha_canje: data.fecha_canje ? (data.fecha_canje.toDate ? data.fecha_canje.toDate().toISOString() : data.fecha_canje) : null
         };
         localStorage.setItem('101_active_license', JSON.stringify(license));
         return license;
       }
-
-      // Consulta 3 (Escaneo de seguridad): Por si el campo fue guardado con espacios o mayúsculas
-      const allDocsSnapshot = await getDocs(codigosRef);
-      for (const docSnap of allDocsSnapshot.docs) {
-        const data = docSnap.data();
-        const docEmail = typeof data.usado_por === 'string' ? data.usado_por.toLowerCase().trim() : '';
-        if (docEmail === sanitizedEmail) {
-          const license: CodigoDocument = {
-            id: docSnap.id,
-            codigo: data.codigo || docSnap.id,
-            canjeado: true,
-            usado_por: sanitizedEmail,
-            fecha_canje: data.fecha_canje ? (data.fecha_canje.toDate ? data.fecha_canje.toDate().toISOString() : data.fecha_canje) : null
-          };
-          localStorage.setItem('101_active_license', JSON.stringify(license));
-          return license;
-        }
-      }
     } catch (err) {
-      console.warn('[Firestore] Consulta de reconocimiento de usuario:', err);
+      console.warn('[Firestore] Consulta de licencia existente:', err);
     }
   }
 
-  // Comprobar registro local persistido
+  // 3. Comprobar registro local persistido
   const codes = getLocalCodes();
   const found = codes.find(c => c.usado_por && c.usado_por.toLowerCase().trim() === sanitizedEmail);
   if (found) {
@@ -280,76 +263,79 @@ export async function checkUserExistingLicense(userEmail: string): Promise<Codig
 }
 
 /**
+ * Función auxiliar inteligente para localizar un documento en la colección 'codigos'
+ * Comprueba tanto el ID de documento directo como el campo 'codigo', admitiendo variaciones.
+ */
+async function findCodigoDocument(inputCode: string): Promise<any | null> {
+  if (!db || !inputCode) return null;
+  const rawCode = inputCode.trim();
+  if (!rawCode) return null;
+
+  const upper = rawCode.toUpperCase();
+  const lower = rawCode.toLowerCase();
+  const clean = rawCode.replace(/[^A-Za-z0-9]/g, '');
+  const cleanUpper = clean.toUpperCase();
+
+  const candidates = Array.from(new Set([rawCode, upper, lower, clean, cleanUpper]));
+  const codigosRef = collection(db, 'codigos');
+
+  // Paso 1: Búsqueda directa por ID de documento (muy rápido, sin necesidad de índices)
+  for (const key of candidates) {
+    try {
+      const snap = await getDoc(doc(db, 'codigos', key));
+      if (snap.exists()) {
+        return snap;
+      }
+    } catch {}
+  }
+
+  // Paso 2: Búsqueda por campo 'codigo'
+  for (const key of candidates) {
+    try {
+      const q = query(codigosRef, where('codigo', '==', key));
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        return snap.docs[0];
+      }
+    } catch {}
+  }
+
+  return null;
+}
+
+/**
  * Verifica únicamente la disponibilidad y validez del código en Firestore
  * SIN quemarlo ni registrar ningún correo todavía.
  */
 export async function checkCodeAvailability(
   inputCode: string
 ): Promise<{ valid: boolean; message: string }> {
-  const sanitizedCode = inputCode.trim().toUpperCase();
-  const cleanCodeNoDashes = sanitizedCode.replace(/[^A-Z0-9]/g, '');
-
+  const sanitizedCode = inputCode.trim();
   if (!sanitizedCode) {
     return { valid: false, message: 'Por favor ingresa un código de acceso válido.' };
   }
 
-  if (db) {
-    try {
-      const codigosRef = collection(db, 'codigos');
-      
-      const firestoreQueryPromise = async () => {
-        let q = query(codigosRef, where('codigo', '==', sanitizedCode));
-        let querySnapshot = await getDocs(q);
-
-        if (querySnapshot.empty && cleanCodeNoDashes !== sanitizedCode) {
-          q = query(codigosRef, where('codigo', '==', cleanCodeNoDashes));
-          querySnapshot = await getDocs(q);
-        }
-
-        let docSnap: any = null;
-        if (!querySnapshot.empty) {
-          docSnap = querySnapshot.docs[0];
-        } else {
-          try {
-            const directDocRef = doc(db, 'codigos', sanitizedCode);
-            const directSnap = await getDoc(directDocRef);
-            if (directSnap.exists()) {
-              docSnap = directSnap;
-            }
-          } catch {}
-        }
-        return docSnap;
+  const docSnap = await findCodigoDocument(sanitizedCode);
+  if (docSnap) {
+    const data = docSnap.data();
+    if (data.canjeado === true) {
+      return {
+        valid: false,
+        message: 'Este código ya ha sido canjeado anteriormente por otra cuenta.'
       };
-
-      const timeoutPromise = new Promise<null>((resolve) => 
-        setTimeout(() => resolve(null), 3500)
-      );
-
-      const docSnap = await Promise.race([firestoreQueryPromise(), timeoutPromise]);
-
-      if (docSnap) {
-        const data = docSnap.data();
-        if (data.canjeado === true) {
-          return {
-            valid: false,
-            message: 'Este código ya ha sido canjeado anteriormente por otra cuenta.'
-          };
-        }
-        return {
-          valid: true,
-          message: 'Código verificado con éxito. Conecta tu cuenta de Google para activarlo a tu nombre.'
-        };
-      }
-    } catch (err: any) {
-      console.warn('[Firestore] Verificación de disponibilidad de código:', err);
     }
+    return {
+      valid: true,
+      message: 'Código verificado con éxito. Continúa para desbloquear con tu cuenta de Google.'
+    };
   }
 
   // Comprobar códigos locales de respaldo
   const codes = getLocalCodes();
+  const clean = sanitizedCode.toUpperCase().replace(/[^A-Z0-9]/g, '');
   const found = codes.find(c => 
-    c.codigo.toUpperCase() === sanitizedCode || 
-    c.codigo.toUpperCase().replace(/[^A-Z0-9]/g, '') === cleanCodeNoDashes
+    c.codigo.toUpperCase() === sanitizedCode.toUpperCase() || 
+    c.codigo.toUpperCase().replace(/[^A-Z0-9]/g, '') === clean
   );
 
   if (found) {
@@ -361,138 +347,43 @@ export async function checkCodeAvailability(
 
   return {
     valid: false,
-    message: 'El código ingresado no existe en el sistema. Verifica que esté bien escrito.'
+    message: 'El código ingresado no existe en Firestore. Verifica que esté bien escrito.'
   };
 }
 
 /**
  * Registra y quema estrictamente el código en Firestore asociándolo ÚNICAMENTE
  * al correo real obtenido de la cuenta autenticada de Google.
- * Si no hay usuario autenticado, detiene el proceso y arroja un error.
  */
 export async function linkVerifiedCodeWithGoogleUser(
   inputCode: string,
   user: UserProfile
 ): Promise<CodigoDocument> {
-  const sanitizedCode = inputCode.trim().toUpperCase();
-  const cleanCodeNoDashes = sanitizedCode.replace(/[^A-Z0-9]/g, '');
-
   if (!user || !user.email || !user.email.includes('@')) {
-    throw new Error('No hay un usuario autenticado con Google. La validación se ha detenido para evitar registrar datos incorrectos.');
+    throw new Error('No hay un usuario autenticado con Google. Por favor, inicia sesión con Google.');
   }
 
-  const realGoogleEmail = user.email.toLowerCase().trim();
-
-  if (db) {
-    const codigosRef = collection(db, 'codigos');
-    
-    let q = query(codigosRef, where('codigo', '==', sanitizedCode));
-    let querySnapshot = await getDocs(q);
-
-    if (querySnapshot.empty && cleanCodeNoDashes !== sanitizedCode) {
-      q = query(codigosRef, where('codigo', '==', cleanCodeNoDashes));
-      querySnapshot = await getDocs(q);
-    }
-
-    let targetDocSnap: any = null;
-    if (!querySnapshot.empty) {
-      targetDocSnap = querySnapshot.docs[0];
-    } else {
-      try {
-        const directDocRef = doc(db, 'codigos', sanitizedCode);
-        const directSnap = await getDoc(directDocRef);
-        if (directSnap.exists()) {
-          targetDocSnap = directSnap;
-        }
-      } catch {}
-    }
-
-    if (targetDocSnap) {
-      const data = targetDocSnap.data();
-
-      if (data.canjeado === true) {
-        if (data.usado_por && data.usado_por.toLowerCase() === realGoogleEmail) {
-          const existingLicense: CodigoDocument = {
-            id: targetDocSnap.id,
-            codigo: data.codigo || sanitizedCode,
-            canjeado: true,
-            usado_por: realGoogleEmail,
-            fecha_canje: data.fecha_canje?.toDate ? data.fecha_canje.toDate().toISOString() : data.fecha_canje
-          };
-          localStorage.setItem('101_active_license', JSON.stringify(existingLicense));
-          return existingLicense;
-        }
-        throw new Error('Este código ya ha sido canjeado por otra cuenta de Google.');
-      }
-
-      // QUEMA Y REGISTRO ESTRICTO EN FIRESTORE CON EL CORREO REAL DE GOOGLE
-      const targetDocRef = doc(db, 'codigos', targetDocSnap.id);
-      await updateDoc(targetDocRef, {
-        canjeado: true,
-        usado_por: realGoogleEmail,
-        fecha_canje: serverTimestamp()
-      });
-
-      const newLicense: CodigoDocument = {
-        id: targetDocSnap.id,
-        codigo: sanitizedCode,
-        canjeado: true,
-        usado_por: realGoogleEmail,
-        fecha_canje: new Date().toISOString()
-      };
-
-      const localCodes = getLocalCodes();
-      localCodes.push(newLicense);
-      saveLocalCodes(localCodes);
-      localStorage.setItem('101_active_license', JSON.stringify(newLicense));
-
-      return newLicense;
-    }
+  const result = await redeemAccessCode(inputCode, user.email);
+  if (!result.success || !result.license) {
+    throw new Error(result.message || 'No se pudo validar el código en Firestore.');
   }
-
-  // Respaldo local si el código existía localmente
-  const codes = getLocalCodes();
-  const codeIndex = codes.findIndex(c => 
-    c.codigo.toUpperCase() === sanitizedCode ||
-    c.codigo.toUpperCase().replace(/[^A-Z0-9]/g, '') === cleanCodeNoDashes
-  );
-
-  if (codeIndex !== -1) {
-    const existing = codes[codeIndex];
-    if (existing.canjeado && existing.usado_por && existing.usado_por.toLowerCase() !== realGoogleEmail) {
-      throw new Error('Este código ya fue canjeado por otra cuenta.');
-    }
-    const updatedLicense: CodigoDocument = {
-      ...existing,
-      canjeado: true,
-      usado_por: realGoogleEmail,
-      fecha_canje: new Date().toISOString()
-    };
-    codes[codeIndex] = updatedLicense;
-    saveLocalCodes(codes);
-    localStorage.setItem('101_active_license', JSON.stringify(updatedLicense));
-    return updatedLicense;
-  }
-
-  throw new Error('El código ingresado no existe en Firestore ni pudo ser validado.');
+  return result.license;
 }
 
 /**
- * Canje de código para usuarios ya autenticados con Google.
- * Requiere estrictamente que userEmail provenga de la sesión de Google.
+ * Canje de código para usuarios autenticados con Google.
+ * Busca el código exactamente en Firestore, verifica que exista y que no esté usado,
+ * lo marca como canjeado, guarda user.email en usado_por y devuelve la licencia.
  */
 export async function redeemAccessCode(
   inputCode: string, 
   userEmail: string
 ): Promise<{ success: boolean; message: string; license?: CodigoDocument }> {
-  const sanitizedCode = inputCode.trim().toUpperCase();
-  const cleanCodeNoDashes = sanitizedCode.replace(/[^A-Z0-9]/g, '');
-
+  const sanitizedCode = inputCode.trim();
   if (!sanitizedCode) {
     return { success: false, message: 'Por favor ingresa un código de acceso válido.' };
   }
 
-  // VERIFICACIÓN ESTRICTA: El correo debe ser un correo real provisto por la autenticación
   const realGoogleEmail = userEmail ? userEmail.trim().toLowerCase() : '';
   if (!realGoogleEmail || !realGoogleEmail.includes('@')) {
     return {
@@ -503,49 +394,33 @@ export async function redeemAccessCode(
 
   if (db) {
     try {
-      const codigosRef = collection(db, 'codigos');
-      
-      let q = query(codigosRef, where('codigo', '==', sanitizedCode));
-      let querySnapshot = await getDocs(q);
-
-      if (querySnapshot.empty && cleanCodeNoDashes !== sanitizedCode) {
-        q = query(codigosRef, where('codigo', '==', cleanCodeNoDashes));
-        querySnapshot = await getDocs(q);
-      }
-
-      let docSnap: any = null;
-      if (!querySnapshot.empty) {
-        docSnap = querySnapshot.docs[0];
-      } else {
-        try {
-          const directDocRef = doc(db, 'codigos', sanitizedCode);
-          const directSnap = await getDoc(directDocRef);
-          if (directSnap.exists()) {
-            docSnap = directSnap;
-          }
-        } catch {}
-      }
+      const docSnap = await findCodigoDocument(sanitizedCode);
 
       if (docSnap) {
         const data = docSnap.data();
+        const isCanjeado = data.canjeado === true;
+        const currentUsadoPor = typeof data.usado_por === 'string' ? data.usado_por.toLowerCase().trim() : '';
 
-        if (data.canjeado === true) {
-          if (data.usado_por && data.usado_por.toLowerCase() === realGoogleEmail) {
+        // Si ya está canjeado: comprobar si pertenece al mismo usuario
+        if (isCanjeado) {
+          if (currentUsadoPor === realGoogleEmail) {
+            const license: CodigoDocument = {
+              id: docSnap.id,
+              codigo: data.codigo || docSnap.id,
+              canjeado: true,
+              usado_por: realGoogleEmail,
+              fecha_canje: data.fecha_canje?.toDate ? data.fecha_canje.toDate().toISOString() : data.fecha_canje
+            };
+            localStorage.setItem('101_active_license', JSON.stringify(license));
             return {
               success: true,
               message: 'Acceso verificado para tu cuenta.',
-              license: {
-                id: docSnap.id,
-                codigo: data.codigo || sanitizedCode,
-                canjeado: true,
-                usado_por: realGoogleEmail,
-                fecha_canje: data.fecha_canje?.toDate ? data.fecha_canje.toDate().toISOString() : data.fecha_canje
-              }
+              license
             };
           }
           return {
             success: false,
-            message: 'Este código ya ha sido canjeado previamente por otra cuenta.'
+            message: 'Este código ya ha sido canjeado por otra cuenta.'
           };
         }
 
@@ -559,7 +434,7 @@ export async function redeemAccessCode(
 
         const newLicense: CodigoDocument = {
           id: docSnap.id,
-          codigo: sanitizedCode,
+          codigo: data.codigo || sanitizedCode.toUpperCase(),
           canjeado: true,
           usado_por: realGoogleEmail,
           fecha_canje: new Date().toISOString()
@@ -577,15 +452,20 @@ export async function redeemAccessCode(
         };
       }
     } catch (err: any) {
-      console.warn('[Firestore] Verificación remota en Firestore:', err);
+      console.warn('[Firestore] Error al canjear código en Firestore:', err);
+      return {
+        success: false,
+        message: err.message || 'Error al conectar con Firestore para validar el código.'
+      };
     }
   }
 
-  // Respaldo local si existía
+  // Respaldo local si existía en base local
   const codes = getLocalCodes();
+  const clean = sanitizedCode.toUpperCase().replace(/[^A-Z0-9]/g, '');
   const codeIndex = codes.findIndex(c => 
-    c.codigo.toUpperCase() === sanitizedCode || 
-    c.codigo.toUpperCase().replace(/[^A-Z0-9]/g, '') === cleanCodeNoDashes
+    c.codigo.toUpperCase() === sanitizedCode.toUpperCase() || 
+    c.codigo.toUpperCase().replace(/[^A-Z0-9]/g, '') === clean
   );
 
   if (codeIndex !== -1) {
@@ -614,7 +494,7 @@ export async function redeemAccessCode(
 
   return {
     success: false,
-    message: 'El código ingresado no existe o no es válido.'
+    message: 'El código ingresado no existe en Firestore. Verifica que esté bien escrito.'
   };
 }
 

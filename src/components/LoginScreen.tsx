@@ -18,6 +18,7 @@ import {
   checkCodeAvailability, 
   linkVerifiedCodeWithGoogleUser, 
   loginWithGoogle,
+  redeemAccessCode,
   validateDirectAccessCode 
 } from '../firebase/config';
 
@@ -30,8 +31,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   onLogin,
   onDirectCodeAccess 
 }) => {
-  // Paso del flujo: 'code' (Paso 1: Código de acceso) -> 'google' (Paso 2: Conectar con Google)
-  const [flowStep, setFlowStep] = useState<'code' | 'google'>('code');
   const [accessCode, setAccessCode] = useState('');
   const [isCheckingCode, setIsCheckingCode] = useState(false);
   const [codeError, setCodeError] = useState<string | null>(null);
@@ -41,65 +40,49 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
   const [showIOSModal, setShowIOSModal] = useState(false);
 
-  // Paso 1: Validar código en Firestore
-  const handleVerifyCode = async (e: React.FormEvent) => {
+  // Desbloqueo directo con código ingresado en el cuadro de texto
+  const handleUnlockWithCode = async (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmed = accessCode.trim().toUpperCase();
+    const trimmed = accessCode.trim();
     if (!trimmed) {
-      setCodeError('Por favor ingresa tu código de acceso.');
+      setCodeError('Por favor ingresa tu código de compra.');
       return;
     }
 
     setIsCheckingCode(true);
     setCodeError(null);
+    setLoginError(null);
 
     try {
-      const result = await checkCodeAvailability(trimmed);
-      if (result.valid) {
+      // 1. Iniciar autenticación limpia con Google para capturar la cuenta real
+      const user = await loginWithGoogle();
+
+      // 2. Canjear código directamente en Firestore asociándolo a user.email
+      const result = await redeemAccessCode(trimmed, user.email);
+
+      if (result.success && result.license) {
         confetti({
-          particleCount: 90,
-          spread: 65,
-          origin: { y: 0.55 },
-          colors: ['#7c3aed', '#4f96fe', '#f97316', '#ffffff']
+          particleCount: 120,
+          spread: 80,
+          origin: { y: 0.6 },
+          colors: ['#7c3aed', '#4f96fe', '#10b981', '#ffffff']
         });
-        setFlowStep('google');
+
+        if (onDirectCodeAccess) {
+          onDirectCodeAccess(result.license, user);
+        }
       } else {
-        setCodeError(result.message || 'Código no válido.');
+        setCodeError(result.message || 'El código no es válido o ya fue canjeado.');
       }
     } catch (err: any) {
-      setCodeError(err.message || 'Error al conectar con Firestore.');
+      console.warn('[Login] Error al validar código:', err?.message || err);
+      if (err?.code === 'auth/popup-closed-by-user') {
+        setCodeError('Se canceló la ventana de Google. Selecciona tu cuenta de Gmail para vincular tu código.');
+      } else {
+        setCodeError(err?.message || 'Error al validar el código en Firestore.');
+      }
     } finally {
       setIsCheckingCode(false);
-    }
-  };
-
-  // Paso 2: Continuar con Google con el código verificado
-  const handleGoogleSignInWithVerifiedCode = async () => {
-    setIsLoggingIn(true);
-    setLoginError(null);
-    try {
-      const user = await loginWithGoogle();
-      const license = await linkVerifiedCodeWithGoogleUser(accessCode, user);
-      
-      confetti({
-        particleCount: 120,
-        spread: 80,
-        origin: { y: 0.6 },
-        colors: ['#7c3aed', '#4f96fe', '#10b981', '#ffffff']
-      });
-
-      if (onDirectCodeAccess) {
-        onDirectCodeAccess(license, user);
-      }
-    } catch (err: any) {
-      console.warn('[Login] Error durante autenticación:', err?.message || err);
-      if (err?.code === 'auth/popup-closed-by-user') {
-        setLoginError('Se canceló la ventana de inicio con Google. Intenta nuevamente para registrar tu código.');
-      } else {
-        setLoginError(err?.message || 'Debes autenticarte con tu cuenta de Google para registrar este código.');
-      }
-    } finally {
-      setIsLoggingIn(false);
     }
   };
 
@@ -107,11 +90,16 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   const handleDirectGoogleLogin = async () => {
     setIsLoggingIn(true);
     setLoginError(null);
+    setCodeError(null);
     try {
       await onLogin();
     } catch (err: any) {
       console.warn('[Login] Error en login directo con Google:', err?.message || err);
-      setLoginError(err?.message || 'No se pudo iniciar sesión con Google.');
+      if (err?.code === 'auth/popup-closed-by-user') {
+        setLoginError('Se canceló la ventana de Google. Por favor, selecciona tu cuenta de Gmail.');
+      } else {
+        setLoginError(err?.message || 'No se pudo iniciar sesión con Google.');
+      }
     } finally {
       setIsLoggingIn(false);
     }
@@ -242,215 +230,135 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
               </div>
             </div>
 
-            {/* PASO 1: PANTALLA INICIAL DE ACCESO INTELIGENTE */}
-            {flowStep === 'code' ? (
-              <div>
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#7c3aed]/10 text-[#7c3aed] text-[10px] font-extrabold uppercase tracking-wider mb-2">
-                  <ShieldCheck className="w-3.5 h-3.5 text-[#7c3aed]" />
-                  <span>Acceso Inteligente</span>
+            {/* PANTALLA DE ACCESO INTELIGENTE */}
+            <div>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#7c3aed]/10 text-[#7c3aed] text-[10px] font-extrabold uppercase tracking-wider mb-2">
+                <ShieldCheck className="w-3.5 h-3.5 text-[#7c3aed]" />
+                <span>Acceso Inteligente</span>
+              </div>
+
+              <h2 className="font-heading text-xl sm:text-2xl font-black text-[#0f2147] mb-1">
+                Acceso al Contenido Oficial
+              </h2>
+              <p className="text-xs text-slate-500 leading-relaxed mb-5">
+                Inicia con Google para reconocimiento automático o activa tu código de acceso.
+              </p>
+
+              {loginError && (
+                <div className="mb-4 p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-medium flex items-start gap-2 text-left">
+                  <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                  <span>{loginError}</span>
                 </div>
+              )}
 
-                <h2 className="font-heading text-xl sm:text-2xl font-black text-[#0f2147] mb-1">
-                  Acceso al Contenido Oficial
-                </h2>
-                <p className="text-xs text-slate-500 leading-relaxed mb-5">
-                  Inicia con Google para reconocimiento automático o activa un nuevo código.
-                </p>
-
-                {loginError && (
-                  <div className="mb-4 p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-medium flex items-start gap-2 text-left">
-                    <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
-                    <span>{loginError}</span>
-                  </div>
-                )}
-
-                {/* BOTÓN PRINCIPAL: Continuar con Google con Reconocimiento Automático */}
-                <button
-                  type="button"
-                  onClick={handleDirectGoogleLogin}
-                  disabled={isLoggingIn || isCheckingCode}
-                  className="w-full py-3.5 px-4 rounded-xl bg-white hover:bg-slate-50 text-[#0f2147] font-black text-xs sm:text-sm shadow-md border-2 border-slate-200 flex items-center justify-center gap-3 transition-all duration-200 active:scale-[0.99] disabled:opacity-50 group mb-2"
-                >
-                  {isLoggingIn ? (
-                    <span className="flex items-center gap-2">
-                      <span className="w-4 h-4 border-2 border-[#7c3aed] border-t-transparent rounded-full animate-spin" />
-                      <span>Verificando tu cuenta de Google...</span>
-                    </span>
-                  ) : (
-                    <>
-                      <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24">
-                        <path
-                          fill="#4285F4"
-                          d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                        />
-                        <path
-                          fill="#34A853"
-                          d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                        />
-                        <path
-                          fill="#FBBC05"
-                          d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-                        />
-                        <path
-                          fill="#EA4335"
-                          d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                        />
-                      </svg>
-                      <span>Continuar con Google</span>
-                      <ArrowRight className="w-4 h-4 text-[#7c3aed] group-hover:translate-x-1 transition-transform ml-auto" />
-                    </>
-                  )}
-                </button>
-
-                <p className="text-[11px] text-slate-500 font-medium mb-4">
-                  Si tu correo ya está registrado, entrarás de inmediato sin pedirte código.
-                </p>
-
-                {/* Divisor */}
-                <div className="flex items-center my-4">
-                  <div className="flex-1 border-t border-slate-200" />
-                  <span className="px-3 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
-                    o activa un código nuevo
+              {/* BOTÓN PRINCIPAL: Continuar con Google con Reconocimiento Automático */}
+              <button
+                type="button"
+                onClick={handleDirectGoogleLogin}
+                disabled={isLoggingIn || isCheckingCode}
+                className="w-full py-3.5 px-4 rounded-xl bg-white hover:bg-slate-50 text-[#0f2147] font-black text-xs sm:text-sm shadow-md border-2 border-slate-200 flex items-center justify-center gap-3 transition-all duration-200 active:scale-[0.99] disabled:opacity-50 group mb-2"
+              >
+                {isLoggingIn ? (
+                  <span className="flex items-center gap-2">
+                    <span className="w-4 h-4 border-2 border-[#7c3aed] border-t-transparent rounded-full animate-spin" />
+                    <span>Verificando tu cuenta de Google...</span>
                   </span>
-                  <div className="flex-1 border-t border-slate-200" />
-                </div>
-
-                {/* Formulario de Código de Acceso */}
-                <form onSubmit={handleVerifyCode} className="space-y-3 mb-2 text-left">
-                  <div>
-                    <label className="block text-[11px] font-extrabold uppercase tracking-wider text-[#0f2147] mb-1.5">
-                      Ingresa tu código de compra
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        value={accessCode}
-                        onChange={(e) => {
-                          setAccessCode(e.target.value.toUpperCase());
-                          setCodeError(null);
-                        }}
-                        placeholder="EJ: CONSEJO-101-GOLD"
-                        disabled={isCheckingCode || isLoggingIn}
-                        className="w-full px-4 py-3 rounded-xl bg-slate-50 border-2 border-slate-200 focus:border-[#7c3aed] focus:bg-white focus:outline-none text-center font-mono font-bold text-sm tracking-wider uppercase text-[#0f2147] placeholder:text-slate-400 transition"
+                ) : (
+                  <>
+                    <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24">
+                      <path
+                        fill="#4285F4"
+                        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
                       />
-                      {accessCode && (
-                        <button
-                          type="button"
-                          onClick={() => setAccessCode('')}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
+                      <path
+                        fill="#34A853"
+                        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                      />
+                      <path
+                        fill="#FBBC05"
+                        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                      />
+                      <path
+                        fill="#EA4335"
+                        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                      />
+                    </svg>
+                    <span>Continuar con Google</span>
+                    <ArrowRight className="w-4 h-4 text-[#7c3aed] group-hover:translate-x-1 transition-transform ml-auto" />
+                  </>
+                )}
+              </button>
 
-                  {codeError && (
-                    <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-medium flex items-start gap-2">
-                      <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
-                      <span>{codeError}</span>
-                    </div>
-                  )}
+              <p className="text-[11px] text-slate-500 font-medium mb-4">
+                Si tu correo ya está registrado en Firestore, entrarás de inmediato.
+              </p>
 
-                  <button
-                    type="submit"
-                    disabled={isCheckingCode || isLoggingIn || !accessCode.trim()}
-                    className="w-full py-3 px-5 rounded-xl bg-[#7c3aed] hover:bg-[#6d28d9] text-white font-black text-xs sm:text-sm tracking-wide shadow-md shadow-[#7c3aed]/20 flex items-center justify-center gap-2 transition-all duration-200 active:scale-[0.99] disabled:opacity-50 disabled:pointer-events-none"
-                  >
-                    {isCheckingCode ? (
-                      <span className="flex items-center gap-2">
-                        <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                        <span>Validando en Firestore...</span>
-                      </span>
-                    ) : (
-                      <>
-                        <Key className="w-4 h-4" />
-                        <span>Verificar Código</span>
-                        <ArrowRight className="w-4 h-4 ml-auto" />
-                      </>
-                    )}
-                  </button>
-                </form>
+              {/* Divisor */}
+              <div className="flex items-center my-4">
+                <div className="flex-1 border-t border-slate-200" />
+                <span className="px-3 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                  o activa tu código nuevo
+                </span>
+                <div className="flex-1 border-t border-slate-200" />
               </div>
-            ) : (
-              /* PASO 2: AUTENTICACIÓN CON GOOGLE CON CÓDIGO VERIFICADO */
-              <div>
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-800 text-[10px] font-extrabold uppercase tracking-wider mb-2">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Código Verificado en Firestore</span>
+
+              {/* Formulario de Código de Acceso */}
+              <form onSubmit={handleUnlockWithCode} className="space-y-3 mb-2 text-left">
+                <div>
+                  <label className="block text-[11px] font-extrabold uppercase tracking-wider text-[#0f2147] mb-1.5">
+                    Ingresa tu código de compra
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={accessCode}
+                      onChange={(e) => {
+                        setAccessCode(e.target.value.toUpperCase());
+                        setCodeError(null);
+                      }}
+                      placeholder="EJ: CONSEJO-101-GOLD"
+                      disabled={isCheckingCode || isLoggingIn}
+                      className="w-full px-4 py-3 rounded-xl bg-slate-50 border-2 border-slate-200 focus:border-[#7c3aed] focus:bg-white focus:outline-none text-center font-mono font-bold text-sm tracking-wider uppercase text-[#0f2147] placeholder:text-slate-400 transition"
+                    />
+                    {accessCode && (
+                      <button
+                        type="button"
+                        onClick={() => setAccessCode('')}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
 
-                <h2 className="font-heading text-xl sm:text-2xl font-black text-[#0f2147] mb-1">
-                  Continuar con Google
-                </h2>
-                
-                <div className="my-3 p-3 rounded-xl bg-slate-50 border border-slate-200 text-center">
-                  <span className="text-[11px] text-slate-500 block">Tu código oficial:</span>
-                  <span className="font-mono font-black text-[#0f2147] text-sm tracking-wider">
-                    {accessCode}
-                  </span>
-                </div>
-
-                <p className="text-xs text-slate-500 leading-relaxed mb-5">
-                  Vincula tu acceso para guardar tu audiolibro y libro digital en tu cuenta de Google y acceder desde cualquier dispositivo.
-                </p>
-
-                {loginError && (
-                  <div className="mb-4 p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-medium text-left">
-                    {loginError}
+                {codeError && (
+                  <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-medium flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                    <span>{codeError}</span>
                   </div>
                 )}
 
-                {/* Botón Principal: Continuar con Google */}
                 <button
-                  type="button"
-                  onClick={handleGoogleSignInWithVerifiedCode}
-                  disabled={isLoggingIn}
-                  className="w-full py-3.5 px-5 rounded-xl bg-white hover:bg-slate-50 text-[#0f2147] font-black text-xs sm:text-sm shadow-md border-2 border-slate-200 flex items-center justify-center gap-3 transition-all duration-200 active:scale-[0.99] disabled:opacity-50 disabled:pointer-events-none group"
+                  type="submit"
+                  disabled={isCheckingCode || isLoggingIn || !accessCode.trim()}
+                  className="w-full py-3.5 px-5 rounded-xl bg-[#7c3aed] hover:bg-[#6d28d9] text-white font-black text-xs sm:text-sm tracking-wide shadow-md shadow-[#7c3aed]/25 flex items-center justify-center gap-2 transition-all duration-200 active:scale-[0.99] disabled:opacity-50 disabled:pointer-events-none"
                 >
-                  {isLoggingIn ? (
+                  {isCheckingCode ? (
                     <span className="flex items-center gap-2">
-                      <span className="w-4 h-4 border-2 border-[#7c3aed] border-t-transparent rounded-full animate-spin" />
-                      <span>Conectando con Google...</span>
+                      <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Validando y desbloqueando...</span>
                     </span>
                   ) : (
                     <>
-                      <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24">
-                        <path
-                          fill="#4285F4"
-                          d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                        />
-                        <path
-                          fill="#34A853"
-                          d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                        />
-                        <path
-                          fill="#FBBC05"
-                          d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-                        />
-                        <path
-                          fill="#EA4335"
-                          d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                        />
-                      </svg>
-                      <span>Continuar con Google</span>
-                      <ArrowRight className="w-4 h-4 text-[#7c3aed] group-hover:translate-x-1 transition-transform ml-auto" />
+                      <Key className="w-4 h-4" />
+                      <span>Validar Código y Desbloquear</span>
+                      <ArrowRight className="w-4 h-4 ml-auto" />
                     </>
                   )}
                 </button>
-
-                {/* Cambiar código */}
-                <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-center text-[11px]">
-                  <button
-                    type="button"
-                    onClick={() => setFlowStep('code')}
-                    className="text-slate-400 hover:text-slate-600 font-medium"
-                  >
-                    &larr; Volver y cambiar código
-                  </button>
-                </div>
-              </div>
-            )}
+              </form>
+            </div>
 
             <div className="mt-4 pt-3.5 border-t border-slate-100 flex items-center justify-center gap-1.5 text-[11px] text-slate-500 font-semibold">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />

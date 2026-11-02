@@ -93,6 +93,16 @@ export default defineConfig(() => {
       alias: {
         '@': path.resolve(import.meta.dirname || '.', '.'),
       },
+      dedupe: ['react', 'react-dom'],
+    },
+    optimizeDeps: {
+      include: [
+        'react',
+        'react/jsx-runtime',
+        'react/jsx-dev-runtime',
+        'react-dom',
+        'react-dom/client'
+      ],
     },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
