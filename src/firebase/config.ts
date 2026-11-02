@@ -264,7 +264,7 @@ export async function checkUserExistingLicense(userEmail: string): Promise<Codig
 
 /**
  * Función auxiliar inteligente para localizar un documento en la colección 'codigos'
- * Comprueba tanto el ID de documento directo como el campo 'codigo', admitiendo variaciones.
+ * Comprueba tanto el ID de documento directo como los campos 'codigo', 'code' y 'codigo_acceso', admitiendo variaciones.
  */
 async function findCodigoDocument(inputCode: string): Promise<any | null> {
   if (!db || !inputCode) return null;
@@ -286,18 +286,24 @@ async function findCodigoDocument(inputCode: string): Promise<any | null> {
       if (snap.exists()) {
         return snap;
       }
-    } catch {}
+    } catch (e: any) {
+      // Si la regla de Firestore arrojó permiso denegado, podría ser un código ya canjeado
+      console.warn('[Firestore] Intento getDoc para clave:', key, e?.message);
+    }
   }
 
-  // Paso 2: Búsqueda por campo 'codigo'
-  for (const key of candidates) {
-    try {
-      const q = query(codigosRef, where('codigo', '==', key));
-      const snap = await getDocs(q);
-      if (!snap.empty) {
-        return snap.docs[0];
-      }
-    } catch {}
+  // Paso 2: Búsqueda por campos 'codigo', 'code', 'codigo_acceso'
+  const fieldsToCheck = ['codigo', 'code', 'codigo_acceso'];
+  for (const field of fieldsToCheck) {
+    for (const key of candidates) {
+      try {
+        const q = query(codigosRef, where(field, '==', key));
+        const snap = await getDocs(q);
+        if (!snap.empty) {
+          return snap.docs[0];
+        }
+      } catch {}
+    }
   }
 
   return null;

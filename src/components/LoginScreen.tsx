@@ -10,16 +10,15 @@ import {
   X,
   Key,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Mail
 } from 'lucide-react';
 import { usePWAInstall } from '../hooks/usePWAInstall';
 import { CodigoDocument, UserProfile } from '../types';
 import { 
-  checkCodeAvailability, 
-  linkVerifiedCodeWithGoogleUser, 
+  checkUserExistingLicense,
   loginWithGoogle,
-  redeemAccessCode,
-  validateDirectAccessCode 
+  redeemAccessCode
 } from '../firebase/config';
 
 interface LoginScreenProps {
@@ -32,6 +31,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   onDirectCodeAccess 
 }) => {
   const [accessCode, setAccessCode] = useState('');
+  const [email, setEmail] = useState(() => {
+    return localStorage.getItem('101_user_email') || '';
+  });
+  const [connectedUser, setConnectedUser] = useState<UserProfile | null>(null);
+
   const [isCheckingCode, setIsCheckingCode] = useState(false);
   const [codeError, setCodeError] = useState<string | null>(null);
 
@@ -40,12 +44,19 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
   const [showIOSModal, setShowIOSModal] = useState(false);
 
-  // Desbloqueo directo con código ingresado en el cuadro de texto
+  // Desbloqueo directo con código ingresado en el cuadro de texto + correo real
   const handleUnlockWithCode = async (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmed = accessCode.trim();
-    if (!trimmed) {
+    const trimmedCode = accessCode.trim().toUpperCase();
+    const trimmedEmail = email.trim().toLowerCase();
+
+    if (!trimmedCode) {
       setCodeError('Por favor ingresa tu código de compra.');
+      return;
+    }
+
+    if (!trimmedEmail || !trimmedEmail.includes('@') || !trimmedEmail.includes('.')) {
+      setCodeError('Por favor ingresa tu correo electrónico (ej: tu-nombre@gmail.com) para vincular tu licencia.');
       return;
     }
 
@@ -54,13 +65,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     setLoginError(null);
 
     try {
-      // 1. Iniciar autenticación limpia con Google para capturar la cuenta real
-      const user = await loginWithGoogle();
-
-      // 2. Canjear código directamente en Firestore asociándolo a user.email
-      const result = await redeemAccessCode(trimmed, user.email);
+      // Canjear código directamente en Firestore asociándolo estrictamente a trimmedEmail
+      const result = await redeemAccessCode(trimmedCode, trimmedEmail);
 
       if (result.success && result.license) {
+        localStorage.setItem('101_user_email', trimmedEmail);
+
         confetti({
           particleCount: 120,
           spread: 80,
@@ -68,37 +78,66 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
           colors: ['#7c3aed', '#4f96fe', '#10b981', '#ffffff']
         });
 
+        const userProfile: UserProfile = connectedUser || {
+          uid: `user-${trimmedEmail.replace(/[^a-zA-Z0-9]/g, '_')}`,
+          email: trimmedEmail,
+          displayName: trimmedEmail.split('@')[0] || 'Lector Oficial',
+          photoURL: null,
+          emailVerified: true
+        };
+
         if (onDirectCodeAccess) {
-          onDirectCodeAccess(result.license, user);
+          onDirectCodeAccess(result.license, userProfile);
         }
       } else {
-        setCodeError(result.message || 'El código no es válido o ya fue canjeado.');
+        setCodeError(result.message || 'El código no es válido o ya fue canjeado por otra cuenta.');
       }
     } catch (err: any) {
-      console.warn('[Login] Error al validar código:', err?.message || err);
-      if (err?.code === 'auth/popup-closed-by-user') {
-        setCodeError('Se canceló la ventana de Google. Selecciona tu cuenta de Gmail para vincular tu código.');
-      } else {
-        setCodeError(err?.message || 'Error al validar el código en Firestore.');
-      }
+      console.warn('[Login] Error al validar código en Firestore:', err?.message || err);
+      setCodeError(err?.message || 'Error al validar el código en Firestore.');
     } finally {
       setIsCheckingCode(false);
     }
   };
 
-  // Entrada directa para usuarios con código ya vinculado a Google
+  // Entrada con Google súper ligera: si ya tiene código canjeado entra directo; si no, captura su correo
   const handleDirectGoogleLogin = async () => {
     setIsLoggingIn(true);
     setLoginError(null);
     setCodeError(null);
+
     try {
-      await onLogin();
+      const user = await loginWithGoogle();
+      setConnectedUser(user);
+
+      if (user && user.email) {
+        const cleanEmail = user.email.toLowerCase().trim();
+        setEmail(cleanEmail);
+        localStorage.setItem('101_user_email', cleanEmail);
+
+        // 1. Verificar si ya tenía una compra registrada en Firestore
+        const existingLicense = await checkUserExistingLicense(cleanEmail);
+        if (existingLicense) {
+          if (onDirectCodeAccess) {
+            onDirectCodeAccess(existingLicense, user);
+          } else {
+            await onLogin();
+          }
+          return;
+        }
+
+        // 2. Si no tiene código aún, enfocar el campo de código
+        setCodeError(null);
+      }
     } catch (err: any) {
-      console.warn('[Login] Error en login directo con Google:', err?.message || err);
+      console.warn('[Login] Aviso Google Auth:', err?.message || err);
+      // Ningún fallo de ventana emergente debe bloquear al usuario
       if (err?.code === 'auth/popup-closed-by-user') {
-        setLoginError('Se canceló la ventana de Google. Por favor, selecciona tu cuenta de Gmail.');
+        setLoginError('Ventana de Google cerrada. Puedes ingresar tu correo y código directamente abajo.');
+      } else if (err?.code === 'auth/popup-blocked') {
+        setLoginError('El navegador bloqueó la ventana emergente. Escribe tu correo y código directamente abajo.');
       } else {
-        setLoginError(err?.message || 'No se pudo iniciar sesión con Google.');
+        setLoginError('No se pudo abrir la ventana emergente. Ingresa tu correo y código directamente abajo.');
       }
     } finally {
       setIsLoggingIn(false);
@@ -304,9 +343,35 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
               {/* Formulario de Código de Acceso */}
               <form onSubmit={handleUnlockWithCode} className="space-y-3 mb-2 text-left">
+                {/* Campo 1: Tu correo electrónico para registrar la licencia */}
                 <div>
-                  <label className="block text-[11px] font-extrabold uppercase tracking-wider text-[#0f2147] mb-1.5">
-                    Ingresa tu código de compra
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[11px] font-extrabold uppercase tracking-wider text-[#0f2147]">
+                      Tu correo electrónico
+                    </label>
+                    {connectedUser && (
+                      <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" /> Conectado
+                      </span>
+                    )}
+                  </div>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      setCodeError(null);
+                    }}
+                    placeholder="tu-correo@gmail.com"
+                    disabled={isCheckingCode || isLoggingIn}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border-2 border-slate-200 focus:border-[#7c3aed] focus:bg-white focus:outline-none text-xs sm:text-sm font-medium text-[#0f2147] placeholder:text-slate-400 transition"
+                  />
+                </div>
+
+                {/* Campo 2: Código de compra */}
+                <div>
+                  <label className="block text-[11px] font-extrabold uppercase tracking-wider text-[#0f2147] mb-1">
+                    Código de compra
                   </label>
                   <div className="relative">
                     <input
@@ -318,7 +383,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                       }}
                       placeholder="EJ: CONSEJO-101-GOLD"
                       disabled={isCheckingCode || isLoggingIn}
-                      className="w-full px-4 py-3 rounded-xl bg-slate-50 border-2 border-slate-200 focus:border-[#7c3aed] focus:bg-white focus:outline-none text-center font-mono font-bold text-sm tracking-wider uppercase text-[#0f2147] placeholder:text-slate-400 transition"
+                      className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border-2 border-slate-200 focus:border-[#7c3aed] focus:bg-white focus:outline-none text-center font-mono font-bold text-xs sm:text-sm tracking-wider uppercase text-[#0f2147] placeholder:text-slate-400 transition"
                     />
                     {accessCode && (
                       <button
