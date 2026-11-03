@@ -7,22 +7,22 @@ import {
   Loader2, 
   BookOpen, 
   RefreshCw, 
-  ZoomIn, 
-  ZoomOut, 
-  Layers, 
-  BookMarked,
-  Download,
-  Trash2,
-  CheckCircle2
+  ChevronLeft, 
+  ChevronRight, 
+  Download, 
+  Trash2, 
+  CheckCircle2,
+  Type,
+  Bookmark
 } from 'lucide-react';
-import { getDigitalBookPdfUrl } from '../firebase/config';
+import { getDigitalBookEpubUrl } from '../firebase/config';
 import { 
-  isPdfOfflineAvailable, 
-  savePdfOffline, 
-  getOfflinePdfData, 
-  deleteOfflinePdf,
-  fetchPdfBinary 
-} from '../services/offlinePdfVault';
+  isEpubOfflineAvailable, 
+  saveEpubOffline, 
+  getOfflineEpubData, 
+  deleteOfflineEpub, 
+  fetchEpubBinary 
+} from '../services/offlineEpubVault';
 
 interface BookReaderProps {
   userEmail: string;
@@ -31,7 +31,8 @@ interface BookReaderProps {
 
 declare global {
   interface Window {
-    pdfjsLib?: any;
+    ePub?: any;
+    JSZip?: any;
   }
 }
 
@@ -39,332 +40,274 @@ export const BookReader: React.FC<BookReaderProps> = ({
   userEmail,
   isSideBySide = false
 }) => {
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
-  const [isLoadingPdf, setIsLoadingPdf] = useState(true);
-  const [pdfError, setPdfError] = useState<string | null>(null);
+  const [epubUrl, setEpubUrl] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // Estados de almacenamiento offline en IndexedDB ("bmc_pdf_offline")
+  // Estados de almacenamiento offline en IndexedDB ("bmc_epub_offline")
   const [isOfflineSaved, setIsOfflineSaved] = useState(false);
   const [isSavingOffline, setIsSavingOffline] = useState(false);
-  const [downloadProgressText, setDownloadProgressText] = useState<string>('');
+  const [saveProgressText, setSaveProgressText] = useState<string>('');
 
-  // Modos de lectura: 'interactive' (Ojear) vs 'continuous' (Continuo)
-  const [displayMode, setDisplayMode] = useState<'interactive' | 'continuous'>('interactive');
-
-  // Documento PDF.js y estado de páginas
-  const [pdfDoc, setPdfDoc] = useState<any>(null);
-  const [totalPages, setTotalPages] = useState<number>(223);
-  const [currentPage, setCurrentPage] = useState<number>(() => {
-    try {
-      const saved = localStorage.getItem('bmc_ultima_pagina_lectura');
-      if (saved) {
-        const p = parseInt(saved, 10);
-        if (!isNaN(p) && p > 0) return p;
-      }
-    } catch {}
-    return 1;
-  });
-  const [isRenderingPage, setIsRenderingPage] = useState(false);
-  const [zoomScale, setZoomScale] = useState(1.0);
+  // Estados de navegación y posición en ePub.js
+  const [currentLocationLabel, setCurrentLocationLabel] = useState<string>('Página 1');
+  const [fontSizePercent, setFontSizePercent] = useState<number>(100);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerContainerRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const renderTaskRef = useRef<any>(null);
-  const renderedContinuousPagesRef = useRef<Set<number>>(new Set());
+  const bookRef = useRef<any>(null);
+  const renditionRef = useRef<any>(null);
 
-  // Comprobar si ya está guardado offline al montar
+  // Comprobar estado offline al montar
   useEffect(() => {
-    isPdfOfflineAvailable().then(avail => setIsOfflineSaved(avail));
+    isEpubOfflineAvailable().then(avail => setIsOfflineSaved(avail));
   }, []);
 
-  // Guardar última página leída en localStorage
-  useEffect(() => {
-    if (currentPage > 0) {
-      try {
-        localStorage.setItem('bmc_ultima_pagina_lectura', currentPage.toString());
-      } catch {}
-    }
-  }, [currentPage]);
-
-  // Asegurar que pdfjsLib esté listo
-  const ensurePdfJsReady = async (): Promise<any> => {
-    if (window.pdfjsLib) {
-      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 
-        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-      return window.pdfjsLib;
+  // Asegurar que ePub.js y JSZip estén listos
+  const ensureEpubJsReady = async (): Promise<any> => {
+    if (window.ePub && window.JSZip) {
+      return window.ePub;
     }
 
     return new Promise((resolve, reject) => {
-      let tries = 0;
-      const interval = setInterval(() => {
-        if (window.pdfjsLib) {
-          clearInterval(interval);
-          window.pdfjsLib.GlobalWorkerOptions.workerSrc = 
-            'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-          resolve(window.pdfjsLib);
-        } else if (tries > 30) {
-          clearInterval(interval);
-          const script = document.createElement('script');
-          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
-          script.onload = () => {
-            if (window.pdfjsLib) {
-              window.pdfjsLib.GlobalWorkerOptions.workerSrc = 
-                'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-              resolve(window.pdfjsLib);
-            } else {
-              reject(new Error('PDF.js no pudo inicializarse'));
-            }
-          };
-          script.onerror = () => reject(new Error('Error cargando PDF.js desde CDN'));
-          document.head.appendChild(script);
+      // 1. Inyectar JSZip si falta
+      const loadZip = new Promise<void>((resZip) => {
+        if (window.JSZip) {
+          resZip();
+        } else {
+          const zipScript = document.createElement('script');
+          zipScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.5/jszip.min.js';
+          zipScript.onload = () => resZip();
+          zipScript.onerror = () => resZip();
+          document.head.appendChild(zipScript);
         }
-        tries++;
-      }, 100);
+      });
+
+      // 2. Inyectar ePub.js una vez listo JSZip
+      loadZip.then(() => {
+        if (window.ePub) {
+          resolve(window.ePub);
+          return;
+        }
+
+        const script = document.createElement('script');
+        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/epub.js/0.3.93/epub.min.js';
+        script.onload = () => {
+          if (window.ePub) {
+            resolve(window.ePub);
+          } else {
+            reject(new Error('ePub.js no se pudo inicializar'));
+          }
+        };
+        script.onerror = () => reject(new Error('Error al cargar ePub.js desde CDN'));
+        document.head.appendChild(script);
+      });
     });
   };
 
-  // Carga directa del libro PDF
-  const loadBook = useCallback(async () => {
-    setIsLoadingPdf(true);
-    setPdfError(null);
-    setDownloadProgressText('Iniciando lector oficial...');
+  // Carga e inicialización del visor EPUB
+  const loadEpubBook = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
 
     try {
-      const pdfjs = await ensurePdfJsReady();
+      const ePubFactory = await ensureEpubJsReady();
 
-      // 1. Verificar si existe en IndexedDB "bmc_pdf_offline"
-      const offlineAvailable = await isPdfOfflineAvailable();
+      // Limpiar visor anterior si existe
+      if (renditionRef.current) {
+        try {
+          renditionRef.current.destroy();
+        } catch {}
+        renditionRef.current = null;
+      }
+      if (bookRef.current) {
+        try {
+          bookRef.current.destroy();
+        } catch {}
+        bookRef.current = null;
+      }
+
+      if (viewerContainerRef.current) {
+        viewerContainerRef.current.innerHTML = '';
+      }
+
+      // 1. Verificar si existe en IndexedDB "bmc_epub_offline" (modo offline o modo avión)
+      const offlineAvailable = await isEpubOfflineAvailable();
       setIsOfflineSaved(offlineAvailable);
 
-      let loadingTask: any = null;
+      let bookSource: any = null;
 
       if (offlineAvailable) {
-        setDownloadProgressText('Cargando libro desde memoria offline...');
-        const offlineBuffer = await getOfflinePdfData();
-        if (offlineBuffer && offlineBuffer.byteLength > 0) {
-          loadingTask = pdfjs.getDocument({
-            data: offlineBuffer,
-            cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
-            cMapPacked: true
-          });
+        const offlineBuffer = await getOfflineEpubData();
+        if (offlineBuffer && offlineBuffer.byteLength > 1000) {
+          bookSource = offlineBuffer;
         }
       }
 
-      // 2. Si no estaba offline, cargar directamente por URL de streaming nativo
-      if (!loadingTask) {
-        setDownloadProgressText('Conectando...');
-        let resolvedUrl = pdfUrl;
+      // 2. Si no estaba offline, resolver la URL de Firebase del EPUB
+      if (!bookSource) {
+        let resolvedUrl = epubUrl;
         if (!resolvedUrl) {
-          const res = await getDigitalBookPdfUrl();
+          const res = await getDigitalBookEpubUrl();
           resolvedUrl = res.url;
-          if (resolvedUrl) setPdfUrl(resolvedUrl);
+          if (resolvedUrl) setEpubUrl(resolvedUrl);
         }
 
         if (!resolvedUrl) {
-          throw new Error('No se pudo encontrar el libro digital en el servidor.');
+          throw new Error('No se pudo encontrar el archivo 101BMC.epub en el servidor.');
         }
 
-        // Carga por streaming nativo con PDF.js (renderiza la primera página de inmediato sin descargar todo de golpe)
-        loadingTask = pdfjs.getDocument({
-          url: resolvedUrl,
-          cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
-          cMapPacked: true
-        });
+        bookSource = resolvedUrl;
       }
 
-      let doc: any = null;
+      // 3. Inicializar ePub.js
+      let book: any;
       try {
-        doc = await loadingTask.promise;
-      } catch (streamErr) {
-        console.warn('[BookReader] Fallo streaming directo, probando vía proxy:', streamErr);
-        const fallbackUrl = `/api/proxy-media?url=${encodeURIComponent(pdfUrl || '')}`;
-        const proxyTask = pdfjs.getDocument({
-          url: fallbackUrl,
-          cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
-          cMapPacked: true
-        });
-        doc = await proxyTask.promise;
+        book = ePubFactory(bookSource);
+      } catch (bookErr) {
+        // Fallback a proxy si la URL directa fue bloqueada por CORS
+        if (typeof bookSource === 'string') {
+          const proxyUrl = `/api/proxy-media?url=${encodeURIComponent(bookSource)}`;
+          book = ePubFactory(proxyUrl);
+        } else {
+          throw bookErr;
+        }
       }
 
-      setPdfDoc(doc);
-      const total = doc.numPages || 223;
-      setTotalPages(total);
-      setCurrentPage(prev => (prev > total ? total : prev < 1 ? 1 : prev));
-      setIsLoadingPdf(false);
-      setDownloadProgressText('');
+      bookRef.current = book;
+
+      // 4. Renderizar a "viewer-container"
+      const containerEl = viewerContainerRef.current;
+      if (!containerEl) return;
+
+      const rendition = book.renderTo(containerEl, {
+        width: '100%',
+        height: '100%',
+        spread: 'auto',
+        flow: 'paginated'
+      });
+      renditionRef.current = rendition;
+
+      // Aplicar estilos tipográficos elegantes y legibles
+      rendition.themes.default({
+        'body': {
+          'font-family': "'Plus Jakarta Sans', system-ui, sans-serif !important",
+          'color': '#0f2147 !important',
+          'background': '#ffffff !important',
+          'padding': '16px 20px !important',
+          'line-height': '1.6 !important'
+        },
+        'p': {
+          'font-size': '16px !important',
+          'line-height': '1.7 !important',
+          'margin-bottom': '1em !important'
+        },
+        'h1, h2, h3, h4': {
+          'font-family': "'Outfit', sans-serif !important",
+          'color': '#0f2147 !important',
+          'font-weight': '800 !important'
+        }
+      });
+
+      // Recuperar última posición guardada
+      const savedLocation = localStorage.getItem('bmc_epub_last_location');
+      await rendition.display(savedLocation || undefined);
+
+      // Evento de reubicación de página
+      rendition.on('relocated', (location: any) => {
+        if (location && location.start) {
+          const cfi = location.start.cfi;
+          if (cfi) {
+            localStorage.setItem('bmc_epub_last_location', cfi);
+          }
+          if (location.start.displayed && location.start.displayed.page) {
+            setCurrentLocationLabel(`Página ${location.start.displayed.page} de ${location.start.displayed.total || ''}`);
+          } else if (location.start.index !== undefined) {
+            setCurrentLocationLabel(`Capítulo ${location.start.index + 1}`);
+          }
+        }
+      });
+
+      // Navegación con teclado dentro del iframe de ePub.js
+      rendition.on('keyup', (e: KeyboardEvent) => {
+        if (e.key === 'ArrowLeft') goToPrev();
+        if (e.key === 'ArrowRight') goToNext();
+      });
+
+      setIsLoading(false);
     } catch (err: any) {
-      console.error('[BookReader] Error cargando libro con PDF.js:', err);
-      setPdfError('No se pudo cargar el libro digital. Por favor, verifica tu conexión o reintenta.');
-      setIsLoadingPdf(false);
-      setDownloadProgressText('');
+      console.error('[BookReader EPUB] Error inicializando:', err);
+      setError('No se pudo abrir el libro digital EPUB. Por favor verifica tu conexión o reintenta.');
+      setIsLoading(false);
     }
-  }, [pdfUrl]);
+  }, [epubUrl]);
 
   useEffect(() => {
-    loadBook();
-  }, [loadBook]);
+    loadEpubBook();
 
-  // Renderizar página individual en modo "Ojear"
-  const renderSinglePage = useCallback(async (pageNum: number) => {
-    if (!pdfDoc || !canvasRef.current) return;
-    setIsRenderingPage(true);
-
-    try {
-      if (renderTaskRef.current) {
+    return () => {
+      if (renditionRef.current) {
         try {
-          renderTaskRef.current.cancel();
+          renditionRef.current.destroy();
         } catch {}
       }
-
-      const page = await pdfDoc.getPage(pageNum);
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-
-      const baseViewport = page.getViewport({ scale: 1.0 });
-      const containerWidth = viewerContainerRef.current 
-        ? viewerContainerRef.current.clientWidth - 32 
-        : window.innerWidth - 48;
-
-      const targetWidth = Math.min(containerWidth, 800);
-      const scale = Math.min(2.5, Math.max(0.6, (targetWidth / baseViewport.width) * zoomScale));
-      const viewport = page.getViewport({ scale });
-
-      const dpr = Math.min(window.devicePixelRatio || 1, 2.0);
-      canvas.width = Math.floor(viewport.width * dpr);
-      canvas.height = Math.floor(viewport.height * dpr);
-      canvas.style.width = `${Math.floor(viewport.width)}px`;
-      canvas.style.height = `${Math.floor(viewport.height)}px`;
-
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-      const renderContext = {
-        canvasContext: ctx,
-        viewport
-      };
-
-      const renderTask = page.render(renderContext);
-      renderTaskRef.current = renderTask;
-      await renderTask.promise;
-    } catch (err: any) {
-      if (err?.name !== 'RenderingCancelledException') {
-        console.warn('[BookReader] Error renderizando página:', err);
+      if (bookRef.current) {
+        try {
+          bookRef.current.destroy();
+        } catch {}
       }
-    } finally {
-      setIsRenderingPage(false);
-    }
-  }, [pdfDoc, zoomScale]);
+    };
+  }, [loadEpubBook]);
 
-  // Renderizar páginas continuas en elementos <canvas> apilados verticalmente
-  const renderContinuousPages = useCallback(async () => {
-    if (!pdfDoc || !viewerContainerRef.current || displayMode !== 'continuous') return;
-
-    const container = viewerContainerRef.current;
-    container.innerHTML = '';
-    renderedContinuousPagesRef.current.clear();
-
-    const total = pdfDoc.numPages || 223;
-
-    for (let i = 1; i <= total; i++) {
-      const pageWrapper = document.createElement('div');
-      pageWrapper.id = `continuous-page-wrapper-${i}`;
-      pageWrapper.className = 'my-4 relative bg-white shadow-xl rounded-xl overflow-hidden flex flex-col items-center select-none';
-      pageWrapper.style.maxWidth = '800px';
-      pageWrapper.style.width = '100%';
-
-      const pageCanvas = document.createElement('canvas');
-      pageCanvas.id = `continuous-canvas-${i}`;
-      pageCanvas.className = 'block max-w-full h-auto pointer-events-none select-none';
-
-      const pageLabel = document.createElement('div');
-      pageLabel.className = 'text-[11px] font-mono font-bold text-slate-400 py-1 bg-slate-50 w-full text-center border-t border-slate-100';
-      pageLabel.textContent = `Página ${i} de ${total}`;
-
-      pageWrapper.appendChild(pageCanvas);
-      pageWrapper.appendChild(pageLabel);
-      container.appendChild(pageWrapper);
-
-      // Renderizar la página
-      try {
-        const page = await pdfDoc.getPage(i);
-        const ctx = pageCanvas.getContext('2d');
-        if (ctx) {
-          const baseViewport = page.getViewport({ scale: 1.0 });
-          const containerWidth = container.clientWidth - 32;
-          const targetWidth = Math.min(containerWidth, 800);
-          const scale = Math.min(2.5, Math.max(0.6, (targetWidth / baseViewport.width) * zoomScale));
-          const viewport = page.getViewport({ scale });
-
-          const dpr = Math.min(window.devicePixelRatio || 1, 2.0);
-          pageCanvas.width = Math.floor(viewport.width * dpr);
-          pageCanvas.height = Math.floor(viewport.height * dpr);
-          pageCanvas.style.width = `${Math.floor(viewport.width)}px`;
-          pageCanvas.style.height = `${Math.floor(viewport.height)}px`;
-
-          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-          await page.render({ canvasContext: ctx, viewport }).promise;
-        }
-      } catch (err) {
-        console.warn(`[BookReader] Error renderizando página continua ${i}:`, err);
-      }
-    }
-  }, [pdfDoc, displayMode, zoomScale]);
-
-  // Actualizar vista según modo
-  useEffect(() => {
-    if (pdfDoc) {
-      if (displayMode === 'interactive') {
-        renderSinglePage(currentPage);
-      } else {
-        renderContinuousPages();
-      }
-    }
-  }, [pdfDoc, displayMode, currentPage, zoomScale, renderSinglePage, renderContinuousPages]);
-
-  // Navegación de páginas en modo "Ojear"
-  const goToNextPage = () => {
-    if (currentPage < totalPages && !isRenderingPage) {
-      setCurrentPage(p => p + 1);
+  // Navegación: Página Anterior
+  const goToPrev = () => {
+    if (renditionRef.current) {
+      renditionRef.current.prev();
     }
   };
 
-  const goToPrevPage = () => {
-    if (currentPage > 1 && !isRenderingPage) {
-      setCurrentPage(p => p - 1);
+  // Navegación: Página Siguiente
+  const goToNext = () => {
+    if (renditionRef.current) {
+      renditionRef.current.next();
     }
   };
 
-  // Guardar libro offline en IndexedDB ("bmc_pdf_offline")
-  const handleSavePdfOffline = async () => {
+  // Control de tamaño de texto
+  const changeFontSize = (delta: number) => {
+    const newSize = Math.max(70, Math.min(180, fontSizePercent + delta));
+    setFontSizePercent(newSize);
+    if (renditionRef.current) {
+      renditionRef.current.themes.fontSize(`${newSize}%`);
+    }
+  };
+
+  // Guardar libro EPUB offline en IndexedDB ("bmc_epub_offline")
+  const handleSaveEpubOffline = async () => {
     try {
       setIsSavingOffline(true);
-      setDownloadProgressText('Descargando archivo binario en memoria...');
+      setSaveProgressText('Guardando libro en memoria local...');
 
-      // Obtener el binario del PDF eludiendo CORS mediante Firebase Storage SDK / XHR
-      const arrayBuffer = await fetchPdfBinary(pdfUrl || undefined);
-      setDownloadProgressText('Guardando en IndexedDB (bmc_pdf_offline)...');
-
-      await savePdfOffline(arrayBuffer);
+      const arrayBuffer = await fetchEpubBinary(epubUrl || undefined);
+      await saveEpubOffline(arrayBuffer);
       setIsOfflineSaved(true);
     } catch (err: any) {
-      console.warn('[BookReader] Error guardando PDF offline:', err);
+      console.warn('[BookReader] Error guardando EPUB offline:', err);
       alert('No se pudo guardar el libro para leer sin conexión. Por favor reintenta.');
     } finally {
       setIsSavingOffline(false);
-      setDownloadProgressText('');
+      setSaveProgressText('');
     }
   };
 
-  const handleDeletePdfOffline = async () => {
+  // Eliminar libro EPUB de IndexedDB
+  const handleDeleteEpubOffline = async () => {
     try {
-      await deleteOfflinePdf();
+      await deleteOfflineEpub();
       setIsOfflineSaved(false);
     } catch (err) {
-      console.warn('[BookReader] Error eliminando PDF offline:', err);
+      console.warn('[BookReader] Error eliminando EPUB offline:', err);
     }
   };
 
@@ -387,11 +330,8 @@ export const BookReader: React.FC<BookReaderProps> = ({
     <div 
       ref={containerRef}
       className={`w-full ${isSideBySide ? 'max-w-none px-0 py-0' : 'max-w-5xl mx-auto px-2 sm:px-4 md:px-6 py-2 sm:py-4'} flex-1 flex flex-col select-none`}
-      onContextMenu={(e) => e.preventDefault()}
-      onCopy={(e) => e.preventDefault()}
-      style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
     >
-      {/* BARRA SUPERIOR DEL VISOR */}
+      {/* BARRA SUPERIOR CON CONTROLES LIMPIOS */}
       <div className="glass-card rounded-2xl p-3 sm:p-4 mb-3 sm:mb-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         
         {/* Identidad del Libro */}
@@ -406,7 +346,7 @@ export const BookReader: React.FC<BookReaderProps> = ({
               </h2>
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-extrabold uppercase">
                 <ShieldCheck className="w-3 h-3 text-emerald-600" />
-                <span>Oficial</span>
+                <span>EPUB Oficial</span>
               </span>
             </div>
             <p className="text-[11px] sm:text-xs text-slate-500 font-medium">
@@ -418,16 +358,16 @@ export const BookReader: React.FC<BookReaderProps> = ({
         {/* Acciones y Botones de Control */}
         <div className="flex items-center justify-between sm:justify-end gap-1.5 sm:gap-2 flex-wrap">
           
-          {/* Botón: 📥 Descargar Libro Offline */}
+          {/* Botón: Guardar libro EPUB offline */}
           {isOfflineSaved ? (
             <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-bold shadow-2xs">
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
               <span>✅ Libro guardado offline</span>
               <button
                 type="button"
-                onClick={handleDeletePdfOffline}
+                onClick={handleDeleteEpubOffline}
                 className="text-slate-400 hover:text-red-500 ml-1 p-0.5 rounded transition cursor-pointer"
-                title="Eliminar libro de la memoria del dispositivo"
+                title="Eliminar de la memoria del dispositivo"
               >
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
@@ -435,94 +375,82 @@ export const BookReader: React.FC<BookReaderProps> = ({
           ) : isSavingOffline ? (
             <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#7c3aed]/10 text-[#7c3aed] border border-[#7c3aed]/20 text-xs font-bold">
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              <span>Guardando en memoria segura...</span>
+              <span>{saveProgressText || 'Guardando offline...'}</span>
             </div>
           ) : (
             <button
               type="button"
-              onClick={handleSavePdfOffline}
+              onClick={handleSaveEpubOffline}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#7c3aed] hover:bg-[#6d28d9] text-white text-xs font-bold shadow-md shadow-[#7c3aed]/25 transition active:scale-95 cursor-pointer"
-              title="Guarda el libro completo en IndexedDB para leerlo sin conexión a internet"
+              title="Guarda el libro en IndexedDB para leerlo sin conexión a internet o en modo avión"
             >
               <Download className="w-3.5 h-3.5" />
-              <span>📥 Descargar Libro Offline</span>
+              <span>📥 Guardar Libro Offline</span>
             </button>
           )}
 
-          {/* Selector de Modo: Ojear vs Continuo */}
-          <div className="flex items-center p-0.5 rounded-xl bg-slate-100 border border-slate-200 text-[11px] font-bold">
+          {/* Ajuste de Tamaño de Fuente */}
+          <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-xl border border-slate-200 text-xs">
             <button
               type="button"
-              onClick={() => setDisplayMode('interactive')}
-              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg transition ${
-                displayMode === 'interactive'
-                  ? 'bg-white text-[#7c3aed] shadow-xs font-black'
-                  : 'text-slate-600 hover:text-[#0f2147]'
-              }`}
-              title="Ojear página por página"
+              onClick={() => changeFontSize(-10)}
+              className="px-2 py-1 rounded-lg hover:bg-white text-slate-700 font-bold transition cursor-pointer"
+              title="Reducir letra"
             >
-              <BookMarked className="w-3.5 h-3.5" />
-              <span>Ojear</span>
+              A-
             </button>
-
+            <span className="text-[11px] font-mono font-bold text-slate-500 px-1">
+              {fontSizePercent}%
+            </span>
             <button
               type="button"
-              onClick={() => setDisplayMode('continuous')}
-              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg transition ${
-                displayMode === 'continuous'
-                  ? 'bg-white text-[#7c3aed] shadow-xs font-black'
-                  : 'text-slate-600 hover:text-[#0f2147]'
-              }`}
-              title="Lectura continua con scroll vertical"
+              onClick={() => changeFontSize(10)}
+              className="px-2 py-1 rounded-lg hover:bg-white text-slate-700 font-bold transition cursor-pointer"
+              title="Aumentar letra"
             >
-              <Layers className="w-3.5 h-3.5" />
-              <span>Continuo</span>
+              A+
             </button>
           </div>
 
-          {/* Zoom */}
-          <div className="hidden sm:flex items-center gap-1 bg-slate-100 p-0.5 rounded-xl border border-slate-200 text-xs">
-            <button 
+          {/* Botones de Navegación en la Barra Superior */}
+          <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-xl border border-slate-200">
+            <button
               type="button"
-              onClick={() => setZoomScale(z => Math.max(z - 0.15, 0.75))} 
-              className="p-1.5 rounded-lg hover:bg-white text-slate-600 transition" 
-              title="Reducir"
+              onClick={goToPrev}
+              disabled={isLoading}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-slate-700 hover:bg-white hover:text-[#7c3aed] text-xs font-bold transition disabled:opacity-30 cursor-pointer active:scale-95"
+              title="Página anterior"
             >
-              <ZoomOut className="w-3.5 h-3.5" />
+              <ChevronLeft className="w-4 h-4" />
+              <span className="hidden md:inline">Anterior</span>
             </button>
-            <button 
+            <button
               type="button"
-              onClick={() => setZoomScale(1.0)} 
-              className="px-1.5 text-[11px] font-mono font-bold text-slate-700" 
-              title="Restablecer"
+              onClick={goToNext}
+              disabled={isLoading}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-slate-700 hover:bg-white hover:text-[#7c3aed] text-xs font-bold transition disabled:opacity-30 cursor-pointer active:scale-95"
+              title="Página siguiente"
             >
-              {Math.round(zoomScale * 100)}%
-            </button>
-            <button 
-              type="button"
-              onClick={() => setZoomScale(z => Math.min(z + 0.15, 2.0))} 
-              className="p-1.5 rounded-lg hover:bg-white text-slate-600 transition" 
-              title="Aumentar"
-            >
-              <ZoomIn className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Siguiente</span>
+              <ChevronRight className="w-4 h-4" />
             </button>
           </div>
 
           {/* Recargar */}
           <button
             type="button"
-            onClick={loadBook}
-            className="p-2 rounded-xl bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 transition shadow-xs"
+            onClick={loadEpubBook}
+            className="p-2 rounded-xl bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 transition shadow-xs cursor-pointer"
             title="Recargar libro"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoadingPdf ? 'animate-spin text-[#7c3aed]' : ''}`} />
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-[#7c3aed]' : ''}`} />
           </button>
 
           {/* Pantalla Completa */}
           <button
             type="button"
             onClick={toggleFullscreen}
-            className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition"
+            className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition cursor-pointer"
             title="Pantalla completa"
           >
             {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
@@ -531,89 +459,80 @@ export const BookReader: React.FC<BookReaderProps> = ({
 
       </div>
 
-      {/* ÁREA PRINCIPAL DEL VISOR INCORPORADO CON PDF.JS */}
+      {/* ÁREA PRINCIPAL DEL VISOR EPUB */}
       <div 
-        id="pdf-viewer-container" 
-        className="w-full h-[70vh] overflow-y-auto flex flex-col items-center bg-[#070f1b] rounded-xl p-2 relative select-none"
+        className="w-full flex-1 flex flex-col rounded-2xl sm:rounded-3xl overflow-hidden glass-card shadow-xl relative border border-white/80 bg-white"
+        style={{ minHeight: isFullscreen ? 'calc(100vh - 100px)' : 'calc(75vh)' }}
       >
-        {isLoadingPdf ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-white my-auto">
+        {isLoading ? (
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-white/90 my-auto min-h-[450px]">
             <Loader2 className="w-8 h-8 text-[#7c3aed] animate-spin mb-3" />
-            <h3 className="font-heading text-base font-bold text-white mb-1">
-              Abriendo el libro digital con PDF.js...
+            <h3 className="font-heading text-base font-bold text-[#0f2147] mb-1">
+              Abriendo libro digital EPUB...
             </h3>
-            <p className="text-xs text-slate-400">
-              {downloadProgressText || 'Renderizando lienzos oficiales...'}
+            <p className="text-xs text-slate-500">
+              Formateando texto fluido y capítulos oficiales...
             </p>
           </div>
-        ) : pdfError ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-white my-auto">
-            <div className="w-12 h-12 rounded-full p-2 bg-red-500/20 text-red-400 flex items-center justify-center mb-3">
+        ) : error ? (
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-white my-auto min-h-[450px]">
+            <div className="w-12 h-12 rounded-full p-2 bg-red-100 text-red-600 flex items-center justify-center mb-3">
               <AlertCircle className="w-6 h-6" />
             </div>
-            <h3 className="font-heading text-base font-bold text-white mb-1">
+            <h3 className="font-heading text-base font-bold text-[#0f2147] mb-1">
               No se pudo abrir el libro
             </h3>
-            <p className="text-xs text-slate-400 max-w-sm mb-4">
-              {pdfError}
+            <p className="text-xs text-slate-500 max-w-sm mb-4">
+              {error}
             </p>
             <button
               type="button"
-              onClick={loadBook}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#7c3aed] text-white text-xs font-bold hover:bg-[#6d28d9] transition"
+              onClick={loadEpubBook}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#7c3aed] text-white text-xs font-bold hover:bg-[#6d28d9] transition cursor-pointer"
             >
               <RefreshCw className="w-3.5 h-3.5" />
               <span>Reintentar</span>
             </button>
           </div>
-        ) : displayMode === 'interactive' ? (
-          /* MODO OJEAR: MUESTRA ÚNICAMENTE UN CANVAS CON LA PÁGINA ACTUAL */
-          <div className="flex-1 flex flex-col items-center justify-center w-full h-full relative">
-            <div className="relative bg-white shadow-2xl rounded-xl overflow-hidden my-auto border border-white/10">
-              {isRenderingPage && (
-                <div className="absolute inset-0 bg-white/70 backdrop-blur-xs flex items-center justify-center z-10">
-                  <Loader2 className="w-6 h-6 text-[#7c3aed] animate-spin" />
-                </div>
-              )}
-              <canvas 
-                ref={canvasRef} 
-                className="block mx-auto max-w-full h-auto select-none pointer-events-none"
-              />
-            </div>
+        ) : null}
 
-            {/* Controles Flotantes para Navegación en Ojear: Botones Grandes */}
-            <div className="sticky bottom-2 mt-4 px-4 sm:px-6 py-2.5 rounded-2xl bg-slate-900/90 backdrop-blur-md border border-white/10 flex items-center gap-4 sm:gap-6 shadow-2xl z-20">
-              <button
-                type="button"
-                onClick={goToPrevPage}
-                disabled={currentPage <= 1 || isRenderingPage}
-                className="px-4 sm:px-5 py-2.5 rounded-xl bg-white/10 hover:bg-[#7c3aed] text-white text-xs sm:text-sm font-bold transition disabled:opacity-30 disabled:pointer-events-none active:scale-95 cursor-pointer shadow-sm"
-                title="Página anterior"
-              >
-                ◀ Anterior
-              </button>
+        {/* CONTENEDOR EXCLUSIVO DE RENDERIZADO EPUB.JS */}
+        <div 
+          id="viewer-container" 
+          ref={viewerContainerRef} 
+          className={`w-full flex-1 h-full min-h-[500px] overflow-hidden ${isLoading || error ? 'hidden' : 'block'}`}
+        />
 
-              <span className="text-xs sm:text-sm font-mono font-bold text-white px-2 whitespace-nowrap">
-                Página {currentPage} de {totalPages || 223}
+        {/* BARRA INFERIOR DE NAVEGACIÓN Y AVANCE */}
+        {!isLoading && !error && (
+          <div className="p-3 sm:p-3.5 bg-slate-50 border-t border-slate-200/80 flex items-center justify-between gap-3 shadow-xs z-10">
+            {/* Botón Página Anterior */}
+            <button
+              type="button"
+              onClick={goToPrev}
+              className="flex items-center gap-1.5 px-4 sm:px-5 py-2.5 rounded-xl bg-white hover:bg-[#7c3aed] hover:text-white text-[#0f2147] text-xs sm:text-sm font-bold border border-slate-200 transition active:scale-95 cursor-pointer shadow-2xs"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              <span>◀ Anterior</span>
+            </button>
+
+            {/* Ubicación / Progreso */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-mono font-bold text-slate-700 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs whitespace-nowrap">
+                {currentLocationLabel}
               </span>
-
-              <button
-                type="button"
-                onClick={goToNextPage}
-                disabled={currentPage >= totalPages || isRenderingPage}
-                className="px-4 sm:px-5 py-2.5 rounded-xl bg-[#7c3aed] hover:bg-[#6d28d9] text-white text-xs sm:text-sm font-bold transition disabled:opacity-30 disabled:pointer-events-none active:scale-95 cursor-pointer shadow-md shadow-[#7c3aed]/30"
-                title="Página siguiente"
-              >
-                Siguiente ▶
-              </button>
             </div>
+
+            {/* Botón Página Siguiente */}
+            <button
+              type="button"
+              onClick={goToNext}
+              className="flex items-center gap-1.5 px-4 sm:px-5 py-2.5 rounded-xl bg-[#7c3aed] hover:bg-[#6d28d9] text-white text-xs sm:text-sm font-bold transition active:scale-95 cursor-pointer shadow-md shadow-[#7c3aed]/25"
+            >
+              <span>Siguiente ▶</span>
+              <ChevronRight className="w-4 h-4" />
+            </button>
           </div>
-        ) : (
-          /* MODO CONTINUO: CONTENEDOR CON TODAS LAS PÁGINAS RENDERIZADAS EN CANVAS */
-          <div 
-            ref={viewerContainerRef} 
-            className="w-full flex flex-col items-center space-y-4 py-2"
-          />
         )}
       </div>
 

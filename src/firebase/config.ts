@@ -874,6 +874,79 @@ export async function getChapterAudioDownloadUrl(
   throw new Error(`No se pudo obtener URL segura mediante getDownloadURL para ${storagePath}`);
 }
 
+// Caché en memoria para la URL del archivo 101BMC.epub
+let cachedEpubDownloadUrl: string | null = null;
+
+/**
+ * Carga el archivo EPUB del Libro Digital desde la raíz de Firebase Storage con el nombre exacto 101BMC.epub
+ * mediante getDownloadURL(ref(storage, '101BMC.epub')).
+ */
+export async function getDigitalBookEpubUrl(): Promise<{ url: string | null; error?: string }> {
+  if (cachedEpubDownloadUrl) {
+    return { url: cachedEpubDownloadUrl };
+  }
+
+  try {
+    // 1. Archivo 101BMC.epub en la raíz de Storage
+    const downloadUrl = await resolveStorageDownloadUrlWithPromises('101BMC.epub');
+    if (downloadUrl) {
+      cachedEpubDownloadUrl = downloadUrl;
+      return { url: downloadUrl };
+    }
+  } catch (err: any) {
+    console.warn('[Firebase Storage] Error al resolver 101BMC.epub en la raíz:', err?.message || err);
+    
+    // 2. Probar en subcarpeta si aplica
+    try {
+      const subfolderUrl = await resolveStorageDownloadUrlWithPromises('libro/101BMC.epub');
+      if (subfolderUrl) {
+        cachedEpubDownloadUrl = subfolderUrl;
+        return { url: subfolderUrl };
+      }
+    } catch {
+      // Ignorar fallback secundario
+    }
+
+    return {
+      url: null,
+      error: 'No se pudo cargar el libro digital EPUB. Por favor, verifica tu conexión.'
+    };
+  }
+
+  return {
+    url: null,
+    error: 'No se pudo resolver el libro digital EPUB.'
+  };
+}
+
+/**
+ * Obtiene los bytes binarios del archivo 101BMC.epub directamente de Firebase Storage.
+ */
+export async function getDigitalBookEpubBytes(): Promise<ArrayBuffer> {
+  try {
+    const storageRef = ref(storage, '101BMC.epub');
+    if (typeof window !== 'undefined' && typeof window.Blob !== 'undefined') {
+      try {
+        const blob = await getBlob(storageRef);
+        return await blob.arrayBuffer();
+      } catch {}
+    }
+    return await getBytes(storageRef);
+  } catch (err) {
+    console.warn('[Firebase Storage] Aviso en 101BMC.epub directo, probando alternativas:', err);
+    try {
+      const subRef = ref(storage, 'libro/101BMC.epub');
+      return await getBytes(subRef);
+    } catch {
+      const urlRes = await getDigitalBookEpubUrl();
+      if (!urlRes.url) throw new Error('No se pudo resolver la URL del libro digital');
+      const resp = await fetch(urlRes.url, { mode: 'cors', cache: 'force-cache' });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status} al descargar EPUB`);
+      return await resp.arrayBuffer();
+    }
+  }
+}
+
 // Caché en memoria para la URL del archivo 101BMC.pdf
 let cachedPdfDownloadUrl: string | null = null;
 
