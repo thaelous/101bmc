@@ -15,7 +15,8 @@ import {
   Trash2, 
   CheckCircle2
 } from 'lucide-react';
-import { getDigitalBookEpubBytes } from '../firebase/config';
+import { ref, getBytes, getBlob } from 'firebase/storage';
+import { storage, getDigitalBookEpubBytes } from '../firebase/config';
 import { 
   isEpubOfflineAvailable, 
   saveEpubOffline, 
@@ -28,8 +29,8 @@ interface BookReaderProps {
   isSideBySide?: boolean;
 }
 
-// Creador seguro para ePub.js compatible con ESM y CJS recibiendo ArrayBuffer en memoria
-const createEpubBook = (source: ArrayBuffer, options?: any): Book => {
+// Creador seguro para ePub.js compatible con ESM y CJS recibiendo localUrl (ObjectURL) o ArrayBuffer
+const createEpubBook = (source: string | ArrayBuffer, options?: any): Book => {
   const factory: any = typeof ePub === 'function' ? ePub : (ePub as any).default;
   return factory(source, options);
 };
@@ -55,19 +56,20 @@ export const BookReader: React.FC<BookReaderProps> = ({
   const viewerContainerRef = useRef<HTMLDivElement>(null);
   const bookRef = useRef<Book | null>(null);
   const renditionRef = useRef<Rendition | null>(null);
+  const blobUrlRef = useRef<string | null>(null);
 
   // Comprobar estado offline al montar
   useEffect(() => {
     isEpubOfflineAvailable().then(avail => setIsOfflineSaved(avail));
   }, []);
 
-  // Carga directa del archivo EPUB mediante Firebase Storage SDK como ArrayBuffer
+  // Carga directa mediante Firebase Storage SDK convertida a ObjectURL local de Blob
   const loadEpubBook = useCallback(async () => {
     setIsLoading(true);
     setError(null);
 
     try {
-      // Limpiar visor y libro anterior si existen
+      // Limpiar visor, libro y ObjectURL anterior si existen
       if (renditionRef.current) {
         try {
           renditionRef.current.destroy();
@@ -79,6 +81,12 @@ export const BookReader: React.FC<BookReaderProps> = ({
           bookRef.current.destroy();
         } catch {}
         bookRef.current = null;
+      }
+      if (blobUrlRef.current) {
+        try {
+          URL.revokeObjectURL(blobUrlRef.current);
+        } catch {}
+        blobUrlRef.current = null;
       }
 
       // Asegurar que el contenedor DOM esté limpio y listo
@@ -92,26 +100,44 @@ export const BookReader: React.FC<BookReaderProps> = ({
       const offlineAvailable = await isEpubOfflineAvailable();
       setIsOfflineSaved(offlineAvailable);
 
-      let epubBuffer: ArrayBuffer | null = null;
+      let bytes: ArrayBuffer | null = null;
 
       if (offlineAvailable) {
         const offlineBuffer = await getOfflineEpubData();
         if (offlineBuffer && offlineBuffer.byteLength > 1000) {
-          epubBuffer = offlineBuffer;
+          bytes = offlineBuffer;
         }
       }
 
-      // 2. Si no estaba en IndexedDB, descargar bytes binarios directamente con Firebase Storage SDK
-      if (!epubBuffer) {
-        epubBuffer = await getDigitalBookEpubBytes();
+      // 2. Si no estaba en IndexedDB, descargar datos binarios con Firebase Storage SDK (getBytes / getBlob)
+      if (!bytes) {
+        try {
+          const epubRef = ref(storage, '101BMC.epub');
+          // getBytes con límite extendido de 100MB (el EPUB pesa ~28.6MB)
+          try {
+            bytes = await getBytes(epubRef, 100 * 1024 * 1024);
+          } catch {
+            const blobData = await getBlob(epubRef);
+            bytes = await blobData.arrayBuffer();
+          }
+        } catch (sdkErr) {
+          console.warn('[BookReader] getBytes con ruta principal aviso, usando fallback:', sdkErr);
+          bytes = await getDigitalBookEpubBytes();
+        }
       }
 
-      if (!epubBuffer || epubBuffer.byteLength < 1000) {
+      if (!bytes || bytes.byteLength < 1000) {
         throw new Error('El archivo del libro digital no contiene datos válidos.');
       }
 
-      // 3. Inicializar ePub.js 100% en memoria con el ArrayBuffer (desempaquetado local sin CORS)
-      const book = createEpubBook(epubBuffer);
+      // 3. Convertir los bytes a un Blob local y crear un ObjectURL de memoria del navegador
+      const blob = new Blob([bytes], { type: 'application/epub+zip' });
+      const localUrl = URL.createObjectURL(blob);
+      blobUrlRef.current = localUrl;
+
+      // 4. Pasar esa localUrl interna a la instancia de ePub(localUrl)
+      // Al ser cargado 100% desde la memoria RAM del navegador, se eluden por completo bloqueos CORS
+      const book = createEpubBook(localUrl);
       bookRef.current = book;
 
       if (!viewerContainerRef.current) return;
@@ -171,9 +197,10 @@ export const BookReader: React.FC<BookReaderProps> = ({
         if (e.key === 'ArrowRight') goToNext();
       });
 
+      // Ocultar círculo de carga cuando el libro esté desplegado
       setIsLoading(false);
     } catch (err: any) {
-      console.warn('[BookReader] Error al cargar EPUB con Firebase Storage SDK:', err?.message || err);
+      console.warn('[BookReader] Error al cargar EPUB con Firebase Storage SDK y Blob ObjectURL:', err?.message || err);
       setIsLoading(false);
       setError('No se pudo abrir el libro digital. Por favor verifica tu conexión o haz clic en Reintentar.');
     }
@@ -183,6 +210,12 @@ export const BookReader: React.FC<BookReaderProps> = ({
     loadEpubBook();
 
     return () => {
+      if (blobUrlRef.current) {
+        try {
+          URL.revokeObjectURL(blobUrlRef.current);
+        } catch {}
+        blobUrlRef.current = null;
+      }
       if (renditionRef.current) {
         try {
           renditionRef.current.destroy();
