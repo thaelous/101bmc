@@ -155,12 +155,24 @@ export const BookReader: React.FC<BookReaderProps> = ({
         }
       });
 
+      // Escuchar eventos de renderizado para ocultar de inmediato el overlay de carga
+      rendition.on('rendered', () => {
+        setIsLoading(false);
+      });
+      rendition.on('started', () => {
+        setIsLoading(false);
+      });
+      rendition.on('displayed', () => {
+        setIsLoading(false);
+      });
+
       // Inicializar y mostrar el libro
       const savedLocation = localStorage.getItem('bmc_epub_last_location');
       await rendition.display(savedLocation || undefined);
 
       // Monitoreo de ubicación y avance
       rendition.on('relocated', (location: any) => {
+        setIsLoading(false);
         if (location && location.start) {
           const cfi = location.start.cfi;
           if (cfi) {
@@ -180,7 +192,7 @@ export const BookReader: React.FC<BookReaderProps> = ({
         if (e.key === 'ArrowRight') goToNext();
       });
 
-      // Ocultar círculo de carga una vez inicializado y desplegado
+      // Ocultar de inmediato el indicador de carga tan pronto esté listo y pintado
       setIsLoading(false);
     } catch (err: any) {
       console.warn('[BookReader] Error al cargar EPUB mediante Blob URL local:', err?.message || err);
@@ -212,17 +224,25 @@ export const BookReader: React.FC<BookReaderProps> = ({
     };
   }, [loadEpubBook]);
 
-  // Navegación conectada a rendition.prev()
+  // Navegación conectada de forma robusta a rendition.prev()
   const goToPrev = () => {
     if (renditionRef.current) {
-      renditionRef.current.prev();
+      try {
+        renditionRef.current.prev();
+      } catch (err) {
+        console.warn('[BookReader] Error al ir a página anterior:', err);
+      }
     }
   };
 
-  // Navegación conectada a rendition.next()
+  // Navegación conectada de forma robusta a rendition.next()
   const goToNext = () => {
     if (renditionRef.current) {
-      renditionRef.current.next();
+      try {
+        renditionRef.current.next();
+      } catch (err) {
+        console.warn('[BookReader] Error al ir a página siguiente:', err);
+      }
     }
   };
 
