@@ -161,79 +161,78 @@ export const BookReader: React.FC<BookReaderProps> = ({
         bookSource = resolvedUrl;
       }
 
-      // 3. Inicializar ePub.js
+      // 3. Inicializar ePub.js y configurar el visor
       let book: any;
-      try {
-        book = ePubFactory(bookSource);
-      } catch (bookErr) {
-        // Fallback a proxy si la URL directa fue bloqueada por CORS
-        if (typeof bookSource === 'string') {
-          const proxyUrl = `/api/proxy-media?url=${encodeURIComponent(bookSource)}`;
-          book = ePubFactory(proxyUrl);
-        } else {
-          throw bookErr;
-        }
-      }
-
-      bookRef.current = book;
-
-      // 4. Renderizar a "viewer-container"
       const containerEl = viewerContainerRef.current;
       if (!containerEl) return;
 
-      const rendition = book.renderTo(containerEl, {
-        width: '100%',
-        height: '100%',
-        spread: 'auto',
-        flow: 'paginated'
-      });
-      renditionRef.current = rendition;
+      const setupRendition = async (b: any) => {
+        bookRef.current = b;
+        containerEl.innerHTML = '';
+        const r = b.renderTo(containerEl, {
+          width: '100%',
+          height: '100%',
+          spread: 'auto',
+          flow: 'paginated'
+        });
+        renditionRef.current = r;
 
-      // Aplicar estilos tipográficos elegantes y legibles
-      rendition.themes.default({
-        'body': {
-          'font-family': "'Plus Jakarta Sans', system-ui, sans-serif !important",
-          'color': '#0f2147 !important',
-          'background': '#ffffff !important',
-          'padding': '16px 20px !important',
-          'line-height': '1.6 !important'
-        },
-        'p': {
-          'font-size': '16px !important',
-          'line-height': '1.7 !important',
-          'margin-bottom': '1em !important'
-        },
-        'h1, h2, h3, h4': {
-          'font-family': "'Outfit', sans-serif !important",
-          'color': '#0f2147 !important',
-          'font-weight': '800 !important'
-        }
-      });
-
-      // Recuperar última posición guardada
-      const savedLocation = localStorage.getItem('bmc_epub_last_location');
-      await rendition.display(savedLocation || undefined);
-
-      // Evento de reubicación de página
-      rendition.on('relocated', (location: any) => {
-        if (location && location.start) {
-          const cfi = location.start.cfi;
-          if (cfi) {
-            localStorage.setItem('bmc_epub_last_location', cfi);
+        // Aplicar estilos tipográficos elegantes y legibles
+        r.themes.default({
+          'body': {
+            'font-family': "'Plus Jakarta Sans', system-ui, sans-serif !important",
+            'color': '#0f2147 !important',
+            'background': '#ffffff !important',
+            'padding': '16px 20px !important',
+            'line-height': '1.6 !important'
+          },
+          'p': {
+            'font-size': '16px !important',
+            'line-height': '1.7 !important',
+            'margin-bottom': '1em !important'
+          },
+          'h1, h2, h3, h4': {
+            'font-family': "'Outfit', sans-serif !important",
+            'color': '#0f2147 !important',
+            'font-weight': '800 !important'
           }
-          if (location.start.displayed && location.start.displayed.page) {
-            setCurrentLocationLabel(`Página ${location.start.displayed.page} de ${location.start.displayed.total || ''}`);
-          } else if (location.start.index !== undefined) {
-            setCurrentLocationLabel(`Capítulo ${location.start.index + 1}`);
-          }
-        }
-      });
+        });
 
-      // Navegación con teclado dentro del iframe de ePub.js
-      rendition.on('keyup', (e: KeyboardEvent) => {
-        if (e.key === 'ArrowLeft') goToPrev();
-        if (e.key === 'ArrowRight') goToNext();
-      });
+        // Recuperar última posición guardada
+        const savedLocation = localStorage.getItem('bmc_epub_last_location');
+        await r.display(savedLocation || undefined);
+
+        // Evento de reubicación de página
+        r.on('relocated', (location: any) => {
+          if (location && location.start) {
+            const cfi = location.start.cfi;
+            if (cfi) {
+              localStorage.setItem('bmc_epub_last_location', cfi);
+            }
+            if (location.start.displayed && location.start.displayed.page) {
+              setCurrentLocationLabel(`Página ${location.start.displayed.page} de ${location.start.displayed.total || ''}`);
+            } else if (location.start.index !== undefined) {
+              setCurrentLocationLabel(`Capítulo ${location.start.index + 1}`);
+            }
+          }
+        });
+
+        // Navegación con teclado
+        r.on('keyup', (e: KeyboardEvent) => {
+          if (e.key === 'ArrowLeft') goToPrev();
+          if (e.key === 'ArrowRight') goToNext();
+        });
+      };
+
+      try {
+        book = ePubFactory(bookSource);
+        await setupRendition(book);
+      } catch (initialErr) {
+        console.warn('[BookReader EPUB] Aviso inicial, probando buffer binario en memoria:', initialErr);
+        const arrayBuffer = await fetchEpubBinary(typeof bookSource === 'string' ? bookSource : undefined);
+        book = ePubFactory(arrayBuffer);
+        await setupRendition(book);
+      }
 
       setIsLoading(false);
     } catch (err: any) {

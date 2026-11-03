@@ -5,13 +5,13 @@ service firebase.storage {
     // Reglas de seguridad de almacenamiento para '101 Buenos Malos Consejos'
     // Permite lectura a usuarios autenticados con Google
     
-    // 1. Libro Digital en la raíz del Storage (101BMC.pdf)
-    match /101BMC.pdf {
+    // 1. Libro Digital EPUB en la raíz del Storage (101BMC.epub)
+    match /101BMC.epub {
       allow read: if true;
       allow write: if false; // Solo administración/consola
     }
 
-    match /101bmc.pdf {
+    match /101bmc.epub {
       allow read: if true;
       allow write: if false;
     }

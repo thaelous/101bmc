@@ -947,51 +947,6 @@ export async function getDigitalBookEpubBytes(): Promise<ArrayBuffer> {
   }
 }
 
-// Caché en memoria para la URL del archivo 101BMC.pdf
-let cachedPdfDownloadUrl: string | null = null;
-
-/**
- * Carga el archivo PDF del Libro Digital desde la raíz de Firebase Storage con el nombre exacto 101BMC.pdf
- * mediante getDownloadURL(ref(storage, '101BMC.pdf')).
- */
-export async function getDigitalBookPdfUrl(): Promise<{ url: string | null; error?: string }> {
-  if (cachedPdfDownloadUrl) {
-    return { url: cachedPdfDownloadUrl };
-  }
-
-  try {
-    // 1. Archivo 101BMC.pdf en la raíz de Storage
-    const downloadUrl = await resolveStorageDownloadUrlWithPromises('101BMC.pdf');
-    if (downloadUrl) {
-      cachedPdfDownloadUrl = downloadUrl;
-      return { url: downloadUrl };
-    }
-  } catch (err: any) {
-    console.warn('[Firebase Storage] Error al resolver 101BMC.pdf en la raíz:', err?.message || err);
-    
-    // 2. Probar en subcarpeta si aplica
-    try {
-      const subfolderUrl = await resolveStorageDownloadUrlWithPromises('libro/101BMC.pdf');
-      if (subfolderUrl) {
-        cachedPdfDownloadUrl = subfolderUrl;
-        return { url: subfolderUrl };
-      }
-    } catch {
-      // Ignorar fallback secundario
-    }
-
-    return {
-      url: null,
-      error: 'No se pudo cargar el libro digital. Por favor, verifica tu conexión.'
-    };
-  }
-
-  return {
-    url: null,
-    error: 'No se pudo resolver el libro digital.'
-  };
-}
-
 /**
  * Obtiene los bytes binarios de un capítulo de audio directamente de Firebase Storage.
  * Utiliza getBlob/getBytes del SDK para eludir restricciones de CORS del navegador.
@@ -1022,37 +977,6 @@ export async function getChapterAudioBytes(
       throw new Error(`Error HTTP ${resp.status} al descargar capítulo de audio`);
     }
     return await resp.arrayBuffer();
-  }
-}
-
-/**
- * Obtiene los bytes binarios del archivo 101BMC.pdf directamente de Firebase Storage.
- * Utiliza getBlob/getBytes del SDK para eludir restricciones de CORS del navegador.
- */
-export async function getDigitalBookPdfBytes(): Promise<ArrayBuffer> {
-  try {
-    const storageRef = ref(storage, '101BMC.pdf');
-    if (typeof window !== 'undefined' && typeof window.Blob !== 'undefined') {
-      try {
-        const blob = await getBlob(storageRef);
-        return await blob.arrayBuffer();
-      } catch (blobErr) {
-        console.warn('[Firebase Storage] getBlob aviso para PDF, probando getBytes:', blobErr);
-      }
-    }
-    return await getBytes(storageRef);
-  } catch (err) {
-    console.warn('[Firebase Storage] Fallo directo en raíz de 101BMC.pdf, probando alternativas:', err);
-    try {
-      const subRef = ref(storage, 'libro/101BMC.pdf');
-      return await getBytes(subRef);
-    } catch {
-      const urlRes = await getDigitalBookPdfUrl();
-      if (!urlRes.url) throw new Error('No se pudo resolver la URL del libro digital');
-      const resp = await fetch(urlRes.url, { mode: 'cors', cache: 'force-cache' });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status} al descargar PDF`);
-      return await resp.arrayBuffer();
-    }
   }
 }
 
