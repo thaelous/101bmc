@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import ePub from 'epubjs';
+import ePub from "epubjs";
 import type { Book, Rendition } from 'epubjs';
 import { 
   Maximize2, 
@@ -15,7 +15,7 @@ import {
   Trash2, 
   CheckCircle2
 } from 'lucide-react';
-import { getDigitalBookEpubUrl, getDigitalBookEpubBytes } from '../firebase/config';
+import { getDigitalBookEpubBytes } from '../firebase/config';
 import { 
   isEpubOfflineAvailable, 
   saveEpubOffline, 
@@ -28,14 +28,10 @@ interface BookReaderProps {
   isSideBySide?: boolean;
 }
 
-// URL pública directa del archivo 101BMC.epub en Firebase Storage
-const FIREBASE_EPUB_DIRECT_URL = 
-  "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/101BMC.epub?alt=media&token=53316237-fc61-4238-941a-4bb49bbce4c8";
-
-// Creador seguro para ePub.js compatible con ESM y CJS recibiendo URL directa de red
-const createEpubBook = (source: string | ArrayBuffer, options?: any): Book => {
-  const factory: any = typeof ePub === 'function' ? ePub : (ePub as any).default;
-  return factory(source, options);
+// Inicializador seguro para compatibilidad entre empaquetadores
+const initEpubBook = (localUrl: string): Book => {
+  const epubFactory: any = typeof ePub === 'function' ? ePub : (ePub as any).default;
+  return epubFactory(localUrl);
 };
 
 export const BookReader: React.FC<BookReaderProps> = ({
@@ -59,19 +55,20 @@ export const BookReader: React.FC<BookReaderProps> = ({
   const viewerContainerRef = useRef<HTMLDivElement>(null);
   const bookRef = useRef<Book | null>(null);
   const renditionRef = useRef<Rendition | null>(null);
+  const blobUrlRef = useRef<string | null>(null);
 
   // Comprobar estado offline al montar
   useEffect(() => {
     isEpubOfflineAvailable().then(avail => setIsOfflineSaved(avail));
   }, []);
 
-  // Carga directa del archivo EPUB por URL pública de Firebase Storage
+  // Carga del archivo EPUB utilizando el método ePub(localUrl) mediante Blob URLs para soporte offline
   const loadEpubBook = useCallback(async () => {
     setIsLoading(true);
     setError(null);
 
     try {
-      // Limpiar visor y libro anterior si existen
+      // Limpiar visor, libro y Blob URL anterior si existen
       if (renditionRef.current) {
         try {
           renditionRef.current.destroy();
@@ -84,6 +81,12 @@ export const BookReader: React.FC<BookReaderProps> = ({
         } catch {}
         bookRef.current = null;
       }
+      if (blobUrlRef.current) {
+        try {
+          URL.revokeObjectURL(blobUrlRef.current);
+        } catch {}
+        blobUrlRef.current = null;
+      }
 
       // Asegurar que el contenedor DOM esté limpio y listo
       const containerEl = viewerContainerRef.current || document.getElementById('viewer-container');
@@ -92,22 +95,42 @@ export const BookReader: React.FC<BookReaderProps> = ({
       }
       containerEl.innerHTML = '';
 
-      // 1. Resolver URL pública directa de Firebase Storage para 101BMC.epub
-      let epubPublicUrl = FIREBASE_EPUB_DIRECT_URL;
-      try {
-        const res = await getDigitalBookEpubUrl();
-        if (res.url) {
-          epubPublicUrl = res.url;
+      // 1. Verificar si existe en IndexedDB "bmc_epub_offline" para soporte offline
+      const offlineAvailable = await isEpubOfflineAvailable();
+      setIsOfflineSaved(offlineAvailable);
+
+      let bytes: ArrayBuffer | null = null;
+
+      if (offlineAvailable) {
+        const offlineBuffer = await getOfflineEpubData();
+        if (offlineBuffer && offlineBuffer.byteLength > 1000) {
+          bytes = offlineBuffer;
         }
-      } catch (urlErr) {
-        console.info('[BookReader] Usando URL directa predeterminada de Firebase:', urlErr);
       }
 
-      // 2. Inicialización directa de la librería con la URL pública (sin fetch, ni getBytes, ni proxys)
-      const book = createEpubBook(epubPublicUrl);
+      // 2. Si no estaba guardado localmente, descargar con Firebase Storage SDK
+      if (!bytes) {
+        bytes = await getDigitalBookEpubBytes();
+        // Guardar automáticamente en IndexedDB para disponibilidad offline inmediata
+        saveEpubOffline(bytes)
+          .then(() => setIsOfflineSaved(true))
+          .catch(() => {});
+      }
+
+      if (!bytes || bytes.byteLength < 1000) {
+        throw new Error('El archivo del libro digital no contiene datos válidos.');
+      }
+
+      // 3. Crear Blob y Blob URL (localUrl) para soportar persistencia offline sin restricciones de red
+      const blob = new Blob([bytes], { type: 'application/epub+zip' });
+      const localUrl = URL.createObjectURL(blob);
+      blobUrlRef.current = localUrl;
+
+      // 4. Inicializar ePub con la localUrl generada desde el Blob
+      const book = initEpubBook(localUrl);
       bookRef.current = book;
 
-      // 3. Configurar la instancia de renderizado exactamente como solicitado
+      // 5. Configurar la instancia de renderizado en 'viewer-container'
       const rendition = book.renderTo("viewer-container", { width: "100%", height: "100%" });
       renditionRef.current = rendition;
 
@@ -160,9 +183,9 @@ export const BookReader: React.FC<BookReaderProps> = ({
       // Ocultar círculo de carga una vez inicializado y desplegado
       setIsLoading(false);
     } catch (err: any) {
-      console.warn('[BookReader] Error al cargar EPUB por URL pública directa:', err?.message || err);
+      console.warn('[BookReader] Error al cargar EPUB mediante Blob URL local:', err?.message || err);
       setIsLoading(false);
-      setError('No se pudo abrir el libro digital por URL. Por favor verifica tu conexión o haz clic en Reintentar.');
+      setError('No se pudo abrir el libro digital. Por favor verifica tu conexión o haz clic en Reintentar.');
     }
   }, []);
 
@@ -170,6 +193,12 @@ export const BookReader: React.FC<BookReaderProps> = ({
     loadEpubBook();
 
     return () => {
+      if (blobUrlRef.current) {
+        try {
+          URL.revokeObjectURL(blobUrlRef.current);
+        } catch {}
+        blobUrlRef.current = null;
+      }
       if (renditionRef.current) {
         try {
           renditionRef.current.destroy();
