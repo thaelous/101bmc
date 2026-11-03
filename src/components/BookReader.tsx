@@ -13,9 +13,17 @@ import {
   ZoomIn, 
   ZoomOut, 
   Layers, 
-  BookMarked 
+  BookMarked,
+  Download,
+  Trash2
 } from 'lucide-react';
-import { getDigitalBookPdfUrl } from '../firebase/config';
+import { getDigitalBookPdfUrl, getDigitalBookPdfBytes } from '../firebase/config';
+import { 
+  isPdfOfflineAvailable, 
+  savePdfForOffline, 
+  getDecryptedPdfBytes, 
+  deleteOfflinePdf 
+} from '../services/offlinePdfVault';
 
 interface BookReaderProps {
   userEmail: string;
@@ -183,6 +191,11 @@ export const BookReader: React.FC<BookReaderProps> = ({
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
+  // Estados de almacenamiento seguro sin conexión (IndexedDB bmc_pdf_offline)
+  const [isPdfOffline, setIsPdfOffline] = useState(false);
+  const [isSavingPdfOffline, setIsSavingPdfOffline] = useState(false);
+  const [savePdfProgress, setSavePdfProgress] = useState(0);
+
   // Modos de visualización: 'interactive' (Ojear página por página) vs 'continuous' (Scroll vertical continuo)
   const [displayMode, setDisplayMode] = useState<'interactive' | 'continuous'>('interactive');
 
@@ -295,48 +308,42 @@ export const BookReader: React.FC<BookReaderProps> = ({
         window.pdfjsLib.GlobalWorkerOptions.workerSrc = 
           'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-        // 3. Descargar el archivo de Firebase Storage en memoria como ArrayBuffer
+        // 3. Verificar primero si el PDF está disponible en el almacén seguro offline (IndexedDB bmc_pdf_offline)
+        const offlineReady = await isPdfOfflineAvailable();
+        setIsPdfOffline(offlineReady);
+
         let arrayBuffer: ArrayBuffer | null = null;
-        try {
-          const response = await fetch(pdfUrl, { mode: 'cors' });
-          if (response.ok) {
-            const contentLength = Number(response.headers.get('content-length')) || 79135989;
-            if (response.body && typeof ReadableStream !== 'undefined') {
-              const reader = response.body.getReader();
-              let receivedBytes = 0;
-              const chunks: Uint8Array[] = [];
+        if (offlineReady) {
+          try {
+            setDownloadProgress(80);
+            arrayBuffer = await getDecryptedPdfBytes(userEmail);
+          } catch (decErr) {
+            console.warn('[BookReader] Error al desencriptar PDF offline desde IndexedDB:', decErr);
+          }
+        }
 
-              while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                if (value) {
-                  chunks.push(value);
-                  receivedBytes += value.length;
-                  if (!isCancelled) {
-                    const pct = Math.min(99, Math.round((receivedBytes / contentLength) * 100));
-                    setDownloadProgress(pct);
-                  }
-                }
+        // 4. Si no está offline o falló la desencriptación, obtener de Firebase Storage
+        if (!arrayBuffer) {
+          try {
+            arrayBuffer = await getDigitalBookPdfBytes();
+          } catch (sdkErr) {
+            console.warn('[BookReader] getDigitalBookPdfBytes aviso, probando fetch:', sdkErr);
+            if (pdfUrl) {
+              const response = await fetch(pdfUrl, { mode: 'cors', cache: 'force-cache' });
+              if (response.ok) {
+                arrayBuffer = await response.arrayBuffer();
               }
-
-              const merged = new Uint8Array(receivedBytes);
-              let offset = 0;
-              for (const chunk of chunks) {
-                merged.set(chunk, offset);
-                offset += chunk.length;
-              }
-              arrayBuffer = merged.buffer;
-            } else {
-              arrayBuffer = await response.arrayBuffer();
             }
           }
-        } catch (fetchErr) {
-          console.warn('[BookReader] Aviso en descarga ArrayBuffer:', fetchErr);
         }
 
         if (isCancelled) return;
 
-        // 4. Instanciar el documento directamente con el ArrayBuffer en memoria (o URL de respaldo)
+        if (!arrayBuffer && !pdfUrl) {
+          throw new Error('No se pudo obtener el contenido del libro digital.');
+        }
+
+        // 5. Instanciar el documento directamente con el ArrayBuffer en memoria (o URL de respaldo)
         const loadingTask = arrayBuffer
           ? window.pdfjsLib.getDocument({
               data: arrayBuffer,
@@ -374,7 +381,36 @@ export const BookReader: React.FC<BookReaderProps> = ({
     return () => {
       isCancelled = true;
     };
-  }, [pdfUrl]);
+  }, [pdfUrl, userEmail]);
+
+  // Guardar y eliminar libro digital en almacenamiento seguro IndexedDB (bmc_pdf_offline)
+  const handleSavePdfOffline = async () => {
+    try {
+      setIsSavingPdfOffline(true);
+      setSavePdfProgress(20);
+
+      const bytes = await getDigitalBookPdfBytes();
+      setSavePdfProgress(50);
+
+      await savePdfForOffline(bytes, (pct) => setSavePdfProgress(pct), userEmail);
+      setIsPdfOffline(true);
+    } catch (err: any) {
+      console.warn('[BookReader] Error al guardar libro offline:', err);
+      alert('No se pudo guardar el libro para leer sin conexión.');
+    } finally {
+      setIsSavingPdfOffline(false);
+      setSavePdfProgress(0);
+    }
+  };
+
+  const handleDeletePdfOffline = async () => {
+    try {
+      await deleteOfflinePdf();
+      setIsPdfOffline(false);
+    } catch (err) {
+      console.warn('[BookReader] Error al eliminar libro offline:', err);
+    }
+  };
 
   // Renderizar la página actual en el modo "Ojear" (página individual en Canvas)
   const renderInteractivePage = useCallback(async (pageNum: number) => {
@@ -598,6 +634,36 @@ export const BookReader: React.FC<BookReaderProps> = ({
             </button>
           </div>
 
+          {/* Botón: Guardar libro para leer sin conexión (IndexedDB bmc_pdf_offline) */}
+          {isPdfOffline ? (
+            <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200/80 text-xs font-bold shadow-2xs">
+              <span>✅ Libro guardado sin conexión</span>
+              <button
+                type="button"
+                onClick={handleDeletePdfOffline}
+                className="text-slate-400 hover:text-red-500 ml-1 p-0.5 rounded transition cursor-pointer"
+                title="Eliminar libro guardado de la memoria"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ) : isSavingPdfOffline ? (
+            <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#7c3aed]/10 text-[#7c3aed] border border-[#7c3aed]/20 text-xs font-bold">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <span>Guardando libro sin conexión... {savePdfProgress > 0 ? `${savePdfProgress}%` : ''}</span>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={handleSavePdfOffline}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-[#7c3aed]/10 text-slate-700 hover:text-[#7c3aed] border border-slate-200 text-xs font-bold transition shadow-2xs active:scale-95 cursor-pointer"
+              title="Cifra con AES-GCM y guarda este libro completo para leerlo sin conexión"
+            >
+              <Download className="w-3.5 h-3.5 text-[#7c3aed]" />
+              <span>⬇️ Guardar libro para leer sin conexión</span>
+            </button>
+          )}
+
           {/* Controles de Zoom */}
           <div className="hidden sm:flex items-center gap-1 bg-slate-100 p-0.5 rounded-xl border border-slate-200 text-xs">
             <button 
@@ -693,8 +759,19 @@ export const BookReader: React.FC<BookReaderProps> = ({
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
           >
-            {/* Contenedor central de la página */}
-            <div className="flex-1 overflow-auto flex items-center justify-center p-2 sm:p-4 md:p-6 bg-slate-100/80">
+            {/* Contenedor central de la página con controles flotantes */}
+            <div className="flex-1 overflow-auto flex items-center justify-center p-2 sm:p-4 md:p-6 bg-slate-100/80 relative">
+              {/* Botón flotante lateral izquierdo: ◀ Anterior */}
+              <button
+                type="button"
+                onClick={goToPrevPage}
+                disabled={currentPage <= 1 || isRenderingPage}
+                className="absolute left-2 sm:left-6 z-20 px-3 py-2 sm:px-4 sm:py-2.5 rounded-2xl bg-white/95 hover:bg-white text-[#0f2147] border border-slate-200/90 shadow-xl backdrop-blur-md text-xs sm:text-sm font-black transition disabled:opacity-0 active:scale-95 cursor-pointer"
+                title="Página anterior"
+              >
+                ◀ Anterior
+              </button>
+
               <div 
                 className={`relative bg-white shadow-2xl rounded-xl sm:rounded-2xl overflow-hidden transition-all duration-300 border border-slate-200/80 ${pageFlipClass}`}
                 style={{
@@ -717,6 +794,17 @@ export const BookReader: React.FC<BookReaderProps> = ({
                 {/* Sombra de lomo central para sensación de libro real */}
                 <div className="absolute inset-y-0 left-0 w-3 bg-gradient-to-r from-black/10 to-transparent pointer-events-none" />
               </div>
+
+              {/* Botón flotante lateral derecho: Siguiente ▶ */}
+              <button
+                type="button"
+                onClick={goToNextPage}
+                disabled={currentPage >= totalPages || isRenderingPage}
+                className="absolute right-2 sm:right-6 z-20 px-3 py-2 sm:px-4 sm:py-2.5 rounded-2xl bg-[#7c3aed]/95 hover:bg-[#7c3aed] text-white shadow-xl shadow-[#7c3aed]/30 text-xs sm:text-sm font-black transition disabled:opacity-0 active:scale-95 cursor-pointer"
+                title="Página siguiente"
+              >
+                Siguiente ▶
+              </button>
             </div>
 
             {/* BARRA INFERIOR DE NAVEGACIÓN Y PASO DE PÁGINA (OJEAR) */}
@@ -726,15 +814,13 @@ export const BookReader: React.FC<BookReaderProps> = ({
                 type="button"
                 onClick={goToPrevPage}
                 disabled={currentPage <= 1 || isRenderingPage}
-                className="flex items-center gap-1.5 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-slate-100 hover:bg-[#7c3aed] hover:text-white text-[#0f2147] text-xs font-bold transition disabled:opacity-30 disabled:pointer-events-none active:scale-95 shadow-2xs"
+                className="flex items-center gap-1 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-slate-100 hover:bg-[#7c3aed] hover:text-white text-[#0f2147] text-xs font-bold transition disabled:opacity-30 disabled:pointer-events-none active:scale-95 shadow-2xs"
                 title="Página anterior (o desliza a la derecha)"
               >
-                <ChevronLeft className="w-4 h-4" />
-                <span className="hidden sm:inline">Página anterior</span>
-                <span className="sm:hidden">Anterior</span>
+                <span>◀ Anterior</span>
               </button>
 
-              {/* Indicador de Página Central */}
+              {/* Indicador de Página Central: "Página X de 223" */}
               <div className="flex items-center gap-2 sm:gap-3">
                 <span className="text-xs font-mono font-bold text-[#0f2147] bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs whitespace-nowrap">
                   Página {currentPage} de {totalPages || 223}
@@ -756,12 +842,10 @@ export const BookReader: React.FC<BookReaderProps> = ({
                 type="button"
                 onClick={goToNextPage}
                 disabled={currentPage >= totalPages || isRenderingPage}
-                className="flex items-center gap-1.5 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-[#7c3aed] hover:bg-[#6d28d9] text-white text-xs font-bold transition disabled:opacity-30 disabled:pointer-events-none active:scale-95 shadow-md shadow-[#7c3aed]/25"
+                className="flex items-center gap-1 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-[#7c3aed] hover:bg-[#6d28d9] text-white text-xs font-bold transition disabled:opacity-30 disabled:pointer-events-none active:scale-95 shadow-md shadow-[#7c3aed]/25"
                 title="Página siguiente (o desliza a la izquierda)"
               >
-                <span className="hidden sm:inline">Página siguiente</span>
-                <span className="sm:hidden">Siguiente</span>
-                <ChevronRight className="w-4 h-4" />
+                <span>Siguiente ▶</span>
               </button>
             </div>
           </div>

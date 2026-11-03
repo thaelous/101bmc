@@ -32,7 +32,9 @@ import {
   getStorage, 
   ref, 
   getDownloadURL, 
-  listAll
+  listAll,
+  getBytes,
+  getBlob
 } from 'firebase/storage';
 import { CodigoDocument, UserProfile, AudioTrackItem } from '../types';
 import { getOfficialAudioTracks, OFFICIAL_113_CHAPTERS, titulosOficiales } from '../data/chaptersData';
@@ -916,3 +918,68 @@ export async function getDigitalBookPdfUrl(): Promise<{ url: string | null; erro
     error: 'No se pudo resolver el libro digital.'
   };
 }
+
+/**
+ * Obtiene los bytes binarios de un capítulo de audio directamente de Firebase Storage.
+ * Utiliza getBlob/getBytes del SDK para eludir restricciones de CORS del navegador.
+ */
+export async function getChapterAudioBytes(
+  chapterNumber: number,
+  customFilename?: string
+): Promise<ArrayBuffer> {
+  const filename = customFilename || `101bmc${chapterNumber}of113.mp3`;
+  const storagePath = `audiolibro/${filename}`;
+
+  try {
+    const storageRef = ref(storage, storagePath);
+    if (typeof window !== 'undefined' && typeof window.Blob !== 'undefined') {
+      try {
+        const blob = await getBlob(storageRef);
+        return await blob.arrayBuffer();
+      } catch (blobErr) {
+        console.warn(`[Firebase Storage] getBlob aviso para ${storagePath}, probando getBytes:`, blobErr);
+      }
+    }
+    return await getBytes(storageRef);
+  } catch (sdkErr) {
+    console.warn(`[Firebase Storage] SDK getBytes fallo para ${storagePath}, probando fetch cors:`, sdkErr);
+    const url = await getChapterAudioDownloadUrl(chapterNumber, filename);
+    const resp = await fetch(url, { mode: 'cors', cache: 'force-cache' });
+    if (!resp.ok) {
+      throw new Error(`Error HTTP ${resp.status} al descargar capítulo de audio`);
+    }
+    return await resp.arrayBuffer();
+  }
+}
+
+/**
+ * Obtiene los bytes binarios del archivo 101BMC.pdf directamente de Firebase Storage.
+ * Utiliza getBlob/getBytes del SDK para eludir restricciones de CORS del navegador.
+ */
+export async function getDigitalBookPdfBytes(): Promise<ArrayBuffer> {
+  try {
+    const storageRef = ref(storage, '101BMC.pdf');
+    if (typeof window !== 'undefined' && typeof window.Blob !== 'undefined') {
+      try {
+        const blob = await getBlob(storageRef);
+        return await blob.arrayBuffer();
+      } catch (blobErr) {
+        console.warn('[Firebase Storage] getBlob aviso para PDF, probando getBytes:', blobErr);
+      }
+    }
+    return await getBytes(storageRef);
+  } catch (err) {
+    console.warn('[Firebase Storage] Fallo directo en raíz de 101BMC.pdf, probando alternativas:', err);
+    try {
+      const subRef = ref(storage, 'libro/101BMC.pdf');
+      return await getBytes(subRef);
+    } catch {
+      const urlRes = await getDigitalBookPdfUrl();
+      if (!urlRes.url) throw new Error('No se pudo resolver la URL del libro digital');
+      const resp = await fetch(urlRes.url, { mode: 'cors', cache: 'force-cache' });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status} al descargar PDF`);
+      return await resp.arrayBuffer();
+    }
+  }
+}
+

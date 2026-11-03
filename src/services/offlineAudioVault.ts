@@ -10,6 +10,8 @@
  * - Desencripta al vuelo en memoria RAM mediante Blob y URL.createObjectURL para reproducir sin conexión.
  */
 
+import { getChapterAudioBytes } from '../firebase/config';
+
 const DB_NAME = 'bmc_audio_offline';
 const DB_VERSION = 1;
 const STORE_CHAPTERS = 'encrypted_chapters';
@@ -137,7 +139,7 @@ export async function saveChapterForOffline(
   chapterNumber: number,
   title: string,
   filename: string,
-  audioUrl: string,
+  audioUrl?: string,
   onProgress?: (progressPercent: number) => void,
   userEmailOrId?: string
 ): Promise<void> {
@@ -146,46 +148,21 @@ export async function saveChapterForOffline(
 
   if (onProgress) onProgress(15);
 
-  // 1. Descarga binaria del archivo .mp3 (ArrayBuffer / Blob en memoria)
-  const response = await fetch(audioUrl, { mode: 'cors' });
-  if (!response.ok) {
-    throw new Error(`Error ${response.status} al descargar audio para almacenamiento offline.`);
-  }
-
-  const contentLength = Number(response.headers.get('content-length')) || 0;
+  // 1. Obtención de bytes binarios (utiliza Firebase Storage SDK getBytes/getBlob para eludir CORS)
   let audioBuffer: ArrayBuffer;
-
-  if (response.body && contentLength > 0 && typeof ReadableStream !== 'undefined') {
-    const reader = response.body.getReader();
-    let receivedBytes = 0;
-    const chunks: Uint8Array[] = [];
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value) {
-        chunks.push(value);
-        receivedBytes += value.length;
-        if (onProgress) {
-          const pct = Math.min(85, Math.round(15 + (receivedBytes / contentLength) * 70));
-          onProgress(pct);
-        }
-      }
+  try {
+    audioBuffer = await getChapterAudioBytes(chapterNumber, filename);
+  } catch (sdkErr) {
+    console.warn(`[OfflineVault] getChapterAudioBytes falló para cap ${chapterNumber}, probando fetch con fallback:`, sdkErr);
+    if (!audioUrl) throw sdkErr;
+    const response = await fetch(audioUrl, { mode: 'cors', cache: 'force-cache' });
+    if (!response.ok) {
+      throw new Error(`Error ${response.status} al descargar audio para almacenamiento offline.`);
     }
-
-    const merged = new Uint8Array(receivedBytes);
-    let offset = 0;
-    for (const chunk of chunks) {
-      merged.set(chunk, offset);
-      offset += chunk.length;
-    }
-    audioBuffer = merged.buffer;
-  } else {
-    if (onProgress) onProgress(60);
     audioBuffer = await response.arrayBuffer();
   }
 
-  if (onProgress) onProgress(90);
+  if (onProgress) onProgress(75);
 
   // 2. Encriptación nativa en memoria con AES-GCM
   const iv = new Uint8Array(12);
