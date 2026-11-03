@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import ePub from 'epubjs';
+import type { Book, Rendition } from 'epubjs';
 import { 
   Maximize2, 
   Minimize2, 
@@ -11,9 +13,7 @@ import {
   ChevronRight, 
   Download, 
   Trash2, 
-  CheckCircle2,
-  Type,
-  Bookmark
+  CheckCircle2
 } from 'lucide-react';
 import { getDigitalBookEpubUrl } from '../firebase/config';
 import { 
@@ -29,12 +29,11 @@ interface BookReaderProps {
   isSideBySide?: boolean;
 }
 
-declare global {
-  interface Window {
-    ePub?: any;
-    JSZip?: any;
-  }
-}
+// Creador seguro para ePub.js compatible con ESM y CJS
+const createEpubBook = (source: string | ArrayBuffer, options?: any): Book => {
+  const factory: any = typeof ePub === 'function' ? ePub : (ePub as any).default;
+  return factory(source, options);
+};
 
 export const BookReader: React.FC<BookReaderProps> = ({
   userEmail,
@@ -56,65 +55,21 @@ export const BookReader: React.FC<BookReaderProps> = ({
 
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerContainerRef = useRef<HTMLDivElement>(null);
-  const bookRef = useRef<any>(null);
-  const renditionRef = useRef<any>(null);
+  const bookRef = useRef<Book | null>(null);
+  const renditionRef = useRef<Rendition | null>(null);
 
   // Comprobar estado offline al montar
   useEffect(() => {
     isEpubOfflineAvailable().then(avail => setIsOfflineSaved(avail));
   }, []);
 
-  // Asegurar que ePub.js y JSZip estén listos
-  const ensureEpubJsReady = async (): Promise<any> => {
-    if (window.ePub && window.JSZip) {
-      return window.ePub;
-    }
-
-    return new Promise((resolve, reject) => {
-      // 1. Inyectar JSZip si falta
-      const loadZip = new Promise<void>((resZip) => {
-        if (window.JSZip) {
-          resZip();
-        } else {
-          const zipScript = document.createElement('script');
-          zipScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.5/jszip.min.js';
-          zipScript.onload = () => resZip();
-          zipScript.onerror = () => resZip();
-          document.head.appendChild(zipScript);
-        }
-      });
-
-      // 2. Inyectar ePub.js una vez listo JSZip
-      loadZip.then(() => {
-        if (window.ePub) {
-          resolve(window.ePub);
-          return;
-        }
-
-        const script = document.createElement('script');
-        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/epub.js/0.3.93/epub.min.js';
-        script.onload = () => {
-          if (window.ePub) {
-            resolve(window.ePub);
-          } else {
-            reject(new Error('ePub.js no se pudo inicializar'));
-          }
-        };
-        script.onerror = () => reject(new Error('Error al cargar ePub.js desde CDN'));
-        document.head.appendChild(script);
-      });
-    });
-  };
-
-  // Carga e inicialización del visor EPUB
+  // Carga e inicialización segura del visor EPUB
   const loadEpubBook = useCallback(async () => {
     setIsLoading(true);
     setError(null);
 
     try {
-      const ePubFactory = await ensureEpubJsReady();
-
-      // Limpiar visor anterior si existe
+      // Limpiar visor y libro anterior si existen
       if (renditionRef.current) {
         try {
           renditionRef.current.destroy();
@@ -128,15 +83,18 @@ export const BookReader: React.FC<BookReaderProps> = ({
         bookRef.current = null;
       }
 
-      if (viewerContainerRef.current) {
-        viewerContainerRef.current.innerHTML = '';
+      // Asegurar que el contenedor DOM esté limpio y listo
+      const containerEl = viewerContainerRef.current;
+      if (!containerEl) {
+        throw new Error('El contenedor del visor no se encuentra en el DOM.');
       }
+      containerEl.innerHTML = '';
 
       // 1. Verificar si existe en IndexedDB "bmc_epub_offline" (modo offline o modo avión)
       const offlineAvailable = await isEpubOfflineAvailable();
       setIsOfflineSaved(offlineAvailable);
 
-      let bookSource: any = null;
+      let bookSource: string | ArrayBuffer | null = null;
 
       if (offlineAvailable) {
         const offlineBuffer = await getOfflineEpubData();
@@ -145,7 +103,7 @@ export const BookReader: React.FC<BookReaderProps> = ({
         }
       }
 
-      // 2. Si no estaba offline, resolver la URL de Firebase del EPUB
+      // 2. Si no estaba offline, resolver la URL pública oficial de Firebase del EPUB ("101BMC.epub")
       if (!bookSource) {
         let resolvedUrl = epubUrl;
         if (!resolvedUrl) {
@@ -155,36 +113,34 @@ export const BookReader: React.FC<BookReaderProps> = ({
         }
 
         if (!resolvedUrl) {
-          throw new Error('No se pudo encontrar el archivo 101BMC.epub en el servidor.');
+          throw new Error('No se pudo resolver la URL del archivo 101BMC.epub en Firebase Storage.');
         }
 
         bookSource = resolvedUrl;
       }
 
-      // 3. Inicializar ePub.js y configurar el visor
-      let book: any;
-      const containerEl = viewerContainerRef.current;
-      if (!containerEl) return;
+      // Función auxiliar para renderizar e inicializar el Rendition en el contenedor
+      const renderBookInstance = async (book: Book) => {
+        bookRef.current = book;
+        if (!viewerContainerRef.current) return;
+        viewerContainerRef.current.innerHTML = '';
 
-      const setupRendition = async (b: any) => {
-        bookRef.current = b;
-        containerEl.innerHTML = '';
-        const r = b.renderTo(containerEl, {
+        const rendition = book.renderTo(viewerContainerRef.current, {
           width: '100%',
           height: '100%',
           spread: 'auto',
           flow: 'paginated'
         });
-        renditionRef.current = r;
+        renditionRef.current = rendition;
 
-        // Aplicar estilos tipográficos elegantes y legibles
-        r.themes.default({
+        // Estilos tipográficos limpios y legibles
+        rendition.themes.default({
           'body': {
             'font-family': "'Plus Jakarta Sans', system-ui, sans-serif !important",
             'color': '#0f2147 !important',
             'background': '#ffffff !important',
             'padding': '16px 20px !important',
-            'line-height': '1.6 !important'
+            'line-height': '1.65 !important'
           },
           'p': {
             'font-size': '16px !important',
@@ -198,12 +154,12 @@ export const BookReader: React.FC<BookReaderProps> = ({
           }
         });
 
-        // Recuperar última posición guardada
+        // Restaurar última página o posición leída
         const savedLocation = localStorage.getItem('bmc_epub_last_location');
-        await r.display(savedLocation || undefined);
+        await rendition.display(savedLocation || undefined);
 
-        // Evento de reubicación de página
-        r.on('relocated', (location: any) => {
+        // Monitoreo de ubicación y avance
+        rendition.on('relocated', (location: any) => {
           if (location && location.start) {
             const cfi = location.start.cfi;
             if (cfi) {
@@ -217,27 +173,29 @@ export const BookReader: React.FC<BookReaderProps> = ({
           }
         });
 
-        // Navegación con teclado
-        r.on('keyup', (e: KeyboardEvent) => {
+        // Navegación con teclado en el iframe del libro
+        rendition.on('keyup', (e: KeyboardEvent) => {
           if (e.key === 'ArrowLeft') goToPrev();
           if (e.key === 'ArrowRight') goToNext();
         });
       };
 
+      // 3. Inicialización protegida con fallback automático ante errores de red o CORS
       try {
-        book = ePubFactory(bookSource);
-        await setupRendition(book);
-      } catch (initialErr) {
-        console.warn('[BookReader EPUB] Aviso inicial, probando buffer binario en memoria:', initialErr);
+        const book = createEpubBook(bookSource);
+        await renderBookInstance(book);
+      } catch (initialErr: any) {
+        console.warn('[BookReader] Aviso al cargar URL directa, probando binario en memoria:', initialErr?.message || initialErr);
+        // Fallback a ArrayBuffer descargado en memoria sin bloqueos de cabecera
         const arrayBuffer = await fetchEpubBinary(typeof bookSource === 'string' ? bookSource : undefined);
-        book = ePubFactory(arrayBuffer);
-        await setupRendition(book);
+        const book = createEpubBook(arrayBuffer);
+        await renderBookInstance(book);
       }
 
       setIsLoading(false);
     } catch (err: any) {
-      console.error('[BookReader EPUB] Error inicializando:', err);
-      setError('No se pudo abrir el libro digital EPUB. Por favor verifica tu conexión o reintenta.');
+      console.warn('[BookReader] Error de red o inicialización del EPUB:', err?.message || err);
+      setError('No se pudo abrir el libro digital. Por favor verifica tu conexión o haz clic en Reintentar.');
       setIsLoading(false);
     }
   }, [epubUrl]);
@@ -259,21 +217,21 @@ export const BookReader: React.FC<BookReaderProps> = ({
     };
   }, [loadEpubBook]);
 
-  // Navegación: Página Anterior
+  // Navegación conectada a rendition.prev()
   const goToPrev = () => {
     if (renditionRef.current) {
       renditionRef.current.prev();
     }
   };
 
-  // Navegación: Página Siguiente
+  // Navegación conectada a rendition.next()
   const goToNext = () => {
     if (renditionRef.current) {
       renditionRef.current.next();
     }
   };
 
-  // Control de tamaño de texto
+  // Control de tamaño de fuente
   const changeFontSize = (delta: number) => {
     const newSize = Math.max(70, Math.min(180, fontSizePercent + delta));
     setFontSizePercent(newSize);
@@ -463,18 +421,22 @@ export const BookReader: React.FC<BookReaderProps> = ({
         className="w-full flex-1 flex flex-col rounded-2xl sm:rounded-3xl overflow-hidden glass-card shadow-xl relative border border-white/80 bg-white"
         style={{ minHeight: isFullscreen ? 'calc(100vh - 100px)' : 'calc(75vh)' }}
       >
-        {isLoading ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-white/90 my-auto min-h-[450px]">
+        {/* Overlay de Carga (Sobrepuesto sin desmontar el visor del DOM) */}
+        {isLoading && (
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-8 text-center bg-white/95 backdrop-blur-xs">
             <Loader2 className="w-8 h-8 text-[#7c3aed] animate-spin mb-3" />
             <h3 className="font-heading text-base font-bold text-[#0f2147] mb-1">
               Abriendo libro digital EPUB...
             </h3>
             <p className="text-xs text-slate-500">
-              Formateando texto fluido y capítulos oficiales...
+              Formateando páginas oficiales y capítulos...
             </p>
           </div>
-        ) : error ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-white my-auto min-h-[450px]">
+        )}
+
+        {/* Overlay de Error */}
+        {error && (
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-8 text-center bg-white">
             <div className="w-12 h-12 rounded-full p-2 bg-red-100 text-red-600 flex items-center justify-center mb-3">
               <AlertCircle className="w-6 h-6" />
             </div>
@@ -493,46 +455,44 @@ export const BookReader: React.FC<BookReaderProps> = ({
               <span>Reintentar</span>
             </button>
           </div>
-        ) : null}
+        )}
 
-        {/* CONTENEDOR EXCLUSIVO DE RENDERIZADO EPUB.JS */}
+        {/* CONTENEDOR SIEMPRE PRESENTE EN EL DOM PARA EVITAR ERRORES DE MONTAJE DE EPUBJS */}
         <div 
           id="viewer-container" 
           ref={viewerContainerRef} 
-          className={`w-full flex-1 h-full min-h-[500px] overflow-hidden ${isLoading || error ? 'hidden' : 'block'}`}
+          className="w-full flex-1 h-full min-h-[500px] overflow-hidden bg-white"
         />
 
         {/* BARRA INFERIOR DE NAVEGACIÓN Y AVANCE */}
-        {!isLoading && !error && (
-          <div className="p-3 sm:p-3.5 bg-slate-50 border-t border-slate-200/80 flex items-center justify-between gap-3 shadow-xs z-10">
-            {/* Botón Página Anterior */}
-            <button
-              type="button"
-              onClick={goToPrev}
-              className="flex items-center gap-1.5 px-4 sm:px-5 py-2.5 rounded-xl bg-white hover:bg-[#7c3aed] hover:text-white text-[#0f2147] text-xs sm:text-sm font-bold border border-slate-200 transition active:scale-95 cursor-pointer shadow-2xs"
-            >
-              <ChevronLeft className="w-4 h-4" />
-              <span>◀ Anterior</span>
-            </button>
+        <div className="p-3 sm:p-3.5 bg-slate-50 border-t border-slate-200/80 flex items-center justify-between gap-3 shadow-xs z-10">
+          {/* Botón Página Anterior */}
+          <button
+            type="button"
+            onClick={goToPrev}
+            className="flex items-center gap-1.5 px-4 sm:px-5 py-2.5 rounded-xl bg-white hover:bg-[#7c3aed] hover:text-white text-[#0f2147] text-xs sm:text-sm font-bold border border-slate-200 transition active:scale-95 cursor-pointer shadow-2xs"
+          >
+            <ChevronLeft className="w-4 h-4" />
+            <span>◀ Anterior</span>
+          </button>
 
-            {/* Ubicación / Progreso */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-mono font-bold text-slate-700 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs whitespace-nowrap">
-                {currentLocationLabel}
-              </span>
-            </div>
-
-            {/* Botón Página Siguiente */}
-            <button
-              type="button"
-              onClick={goToNext}
-              className="flex items-center gap-1.5 px-4 sm:px-5 py-2.5 rounded-xl bg-[#7c3aed] hover:bg-[#6d28d9] text-white text-xs sm:text-sm font-bold transition active:scale-95 cursor-pointer shadow-md shadow-[#7c3aed]/25"
-            >
-              <span>Siguiente ▶</span>
-              <ChevronRight className="w-4 h-4" />
-            </button>
+          {/* Ubicación / Progreso */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-mono font-bold text-slate-700 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs whitespace-nowrap">
+              {currentLocationLabel}
+            </span>
           </div>
-        )}
+
+          {/* Botón Página Siguiente */}
+          <button
+            type="button"
+            onClick={goToNext}
+            className="flex items-center gap-1.5 px-4 sm:px-5 py-2.5 rounded-xl bg-[#7c3aed] hover:bg-[#6d28d9] text-white text-xs sm:text-sm font-bold transition active:scale-95 cursor-pointer shadow-md shadow-[#7c3aed]/25"
+          >
+            <span>Siguiente ▶</span>
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
     </div>
