@@ -1,10 +1,13 @@
 /**
  * Módulo de Almacenamiento Seguro para el Audiolibro Completo
  * Base de datos IndexedDB: "bmc_audios_db"
+ * Cache API: "bmc-audios-offline-v1"
  * 
- * Descarga y almacena los 113 capítulos como Blobs binarios usando:
- * - getBlob() / getBytes() del SDK de Firebase Storage (elude restricciones de CORS)
- * - Fallback a XMLHttpRequest con responseType = 'blob'
+ * Permite descargar y almacenar los 113 capítulos como Blobs binarios usando:
+ * - Cache API nativa del navegador (caches.open('bmc-audios-offline-v1'))
+ * - Fallback con https://corsproxy.io/? + encodeURIComponent(audioUrl) para eludir CORS
+ * - Firebase Storage SDK getBlob() / getBytes()
+ * - XMLHttpRequest con responseType = 'blob'
  * - Reproducción instantánea offline mediante URL.createObjectURL(blob)
  */
 
@@ -14,6 +17,7 @@ import { storage } from '../firebase/config';
 const DB_NAME = 'bmc_audios_db';
 const DB_VERSION = 1;
 const STORE_AUDIOS = 'audios';
+const CACHE_NAME = 'bmc-audios-offline-v1';
 
 let dbInstance: IDBDatabase | null = null;
 
@@ -56,8 +60,11 @@ export interface AudioChapterRecord {
 }
 
 /**
- * Descarga el archivo de audio como Blob utilizando getBlob/getBytes del SDK oficial de Firebase Storage,
- * o XMLHttpRequest con responseType = 'blob' para eludir restricciones de CORS.
+ * Descarga el archivo de audio como Blob utilizando múltiples estrategias para evitar cualquier error de CORS:
+ * 1. Firebase Storage SDK getBlob() / getBytes()
+ * 2. Fallback a corsproxy.io con encodeURIComponent para extraer el ArrayBuffer limpio
+ * 3. Fallback a XMLHttpRequest con responseType = 'blob'
+ * 4. Cache API nativa del navegador con caches.open('bmc-audios-offline-v1')
  */
 export async function fetchAudioBlob(
   chapterNumber: number,
@@ -67,39 +74,83 @@ export async function fetchAudioBlob(
   const actualFilename = filename || `101bmc${chapterNumber}of113.mp3`;
   const storagePath = `audiolibro/${actualFilename}`;
 
-  // 1. Firebase Storage SDK: getBlob()
+  // 1. Firebase Storage SDK: getBlob() o getBytes()
   try {
     const storageRef = ref(storage, storagePath);
     if (typeof window !== 'undefined' && typeof window.Blob !== 'undefined') {
       try {
         const blob = await getBlob(storageRef);
-        return blob;
+        if (blob && blob.size > 1000) {
+          return blob;
+        }
       } catch (blobErr) {
-        console.warn(`[AudioVault] getBlob aviso para ${storagePath}, probando getBytes:`, blobErr);
+        console.warn(`[AudioVault] getBlob aviso para ${storagePath}, probando alternativas:`, blobErr);
       }
     }
     const bytes = await getBytes(storageRef);
-    return new Blob([bytes], { type: 'audio/mpeg' });
+    if (bytes && bytes.byteLength > 1000) {
+      return new Blob([bytes], { type: 'audio/mpeg' });
+    }
   } catch (sdkErr) {
     console.warn(`[AudioVault] Firebase Storage SDK aviso para ${storagePath}:`, sdkErr);
   }
 
-  // 2. XMLHttpRequest con responseType = 'blob' (elude bloqueos de fetch CORS en navegadores móviles)
+  // 2. Fallback con https://corsproxy.io/? + encodeURIComponent(audioUrl)
   if (audioUrl) {
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open('GET', audioUrl, true);
-      xhr.responseType = 'blob';
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          resolve(xhr.response as Blob);
-        } else {
-          reject(new Error(`Error XHR ${xhr.status} al descargar capítulo ${chapterNumber}`));
+    try {
+      const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(audioUrl)}`;
+      const proxyResp = await fetch(proxyUrl);
+      if (proxyResp.ok) {
+        const blob = await proxyResp.blob();
+        if (blob && blob.size > 1000) {
+          return blob;
         }
-      };
-      xhr.onerror = () => reject(new Error(`Error de red XHR al descargar capítulo ${chapterNumber}`));
-      xhr.send();
-    });
+      }
+    } catch (proxyErr) {
+      console.warn(`[AudioVault] corsproxy.io fallo para cap ${chapterNumber}:`, proxyErr);
+    }
+  }
+
+  // 3. Fallback a XMLHttpRequest con responseType = 'blob'
+  if (audioUrl) {
+    try {
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('GET', audioUrl, true);
+        xhr.responseType = 'blob';
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300 && xhr.response) {
+            resolve(xhr.response as Blob);
+          } else {
+            reject(new Error(`Status XHR ${xhr.status}`));
+          }
+        };
+        xhr.onerror = () => reject(new Error('XHR network error'));
+        xhr.send();
+      });
+
+      if (blob && blob.size > 1000) {
+        return blob;
+      }
+    } catch (xhrErr) {
+      console.warn(`[AudioVault] XHR aviso para cap ${chapterNumber}:`, xhrErr);
+    }
+  }
+
+  // 4. Fallback con Cache API nativa del navegador (caches.open('bmc-audios-offline-v1'))
+  if (audioUrl && typeof window !== 'undefined' && 'caches' in window) {
+    try {
+      const cache = await caches.open(CACHE_NAME);
+      const req = new Request(audioUrl, { mode: 'no-cors' });
+      await cache.put(req, await fetch(audioUrl, { mode: 'no-cors' }));
+      const match = await cache.match(req);
+      if (match) {
+        const blob = await match.blob();
+        if (blob && blob.size > 0) return blob;
+      }
+    } catch (cacheErr) {
+      console.warn(`[AudioVault] Cache API aviso para cap ${chapterNumber}:`, cacheErr);
+    }
   }
 
   throw new Error(`No se pudo obtener el audio para el capítulo ${chapterNumber}`);
@@ -180,31 +231,49 @@ export async function saveChapterForOffline(
     req.onerror = () => reject(req.error);
   });
 
+  // Guardar también en Cache API si audioUrl está presente para redundancia
+  if (audioUrl && typeof window !== 'undefined' && 'caches' in window) {
+    try {
+      const cache = await caches.open(CACHE_NAME);
+      await cache.put(audioUrl, new Response(blob));
+    } catch {}
+  }
+
   if (onProgress) onProgress(100);
 }
 
 /**
- * Obtiene la URL de objeto (URL.createObjectURL) para el capítulo desde IndexedDB
+ * Obtiene la URL de objeto (URL.createObjectURL) para el capítulo desde IndexedDB o Cache API
  */
-export async function getDecryptedChapterAudioUrl(chapterNumber: number): Promise<string | null> {
+export async function getDecryptedChapterAudioUrl(chapterNumber: number, audioUrl?: string): Promise<string | null> {
   try {
     const db = await openAudiosDB();
-    return new Promise((resolve) => {
+    const record = await new Promise<AudioChapterRecord | null>((resolve) => {
       const tx = db.transaction(STORE_AUDIOS, 'readonly');
       const store = tx.objectStore(STORE_AUDIOS);
       const req = store.get(chapterNumber);
 
-      req.onsuccess = () => {
-        if (req.result && req.result.blob) {
-          const blob = req.result.blob as Blob;
-          const objectUrl = URL.createObjectURL(blob);
-          resolve(objectUrl);
-        } else {
-          resolve(null);
-        }
-      };
+      req.onsuccess = () => resolve((req.result as AudioChapterRecord) || null);
       req.onerror = () => resolve(null);
     });
+
+    if (record && record.blob) {
+      return URL.createObjectURL(record.blob);
+    }
+
+    // Si no está en IndexedDB, intentar con Cache API
+    if (audioUrl && typeof window !== 'undefined' && 'caches' in window) {
+      try {
+        const cache = await caches.open(CACHE_NAME);
+        const match = await cache.match(audioUrl);
+        if (match) {
+          const blob = await match.blob();
+          return URL.createObjectURL(blob);
+        }
+      } catch {}
+    }
+
+    return null;
   } catch (err) {
     console.warn('[AudioVault] Error obteniendo audio offline:', err);
     return null;

@@ -804,14 +804,14 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             </div>
           </div>
 
-          {/* Botón Masivo Oficial: ⬇️ Descargar audiolibro completo (113 capítulos) */}
+          {/* Botón Masivo Oficial: ⬇️ Descargar todos los capítulos (Modo sin conexión) */}
           <div className="mt-4 pt-3.5 border-t border-slate-100 flex flex-col items-center justify-center gap-2">
             {isBulkDownloading && bulkProgress ? (
               <div className="w-full max-w-md p-3.5 rounded-2xl bg-[#7c3aed]/10 border border-[#7c3aed]/25 flex flex-col gap-2">
                 <div className="flex items-center justify-between text-xs font-bold text-[#7c3aed]">
                   <span className="flex items-center gap-1.5">
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>Descargando audiolibro: Capítulo {bulkProgress.current} de {bulkProgress.total}</span>
+                    <span>Guardando {bulkProgress.current} de {bulkProgress.total}...</span>
                   </span>
                   <span>{bulkProgress.percent}%</span>
                 </div>
@@ -838,19 +838,39 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             ) : offlineChapterNumbers.size >= 113 ? (
               <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-bold shadow-2xs">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                <span>✅ Audiolibro listo para usar sin conexión (113 capítulos)</span>
+                <span>✅ Todos los capítulos guardados (Modo sin conexión listo)</span>
               </div>
             ) : (
               <div className="flex flex-col items-center gap-2 w-full">
-                <button
-                  type="button"
-                  onClick={handleStartBulkDownload}
-                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#7c3aed] to-[#4f96fe] hover:from-[#6d28d9] hover:to-[#3b82f6] text-white text-xs font-black uppercase tracking-wider shadow-md shadow-[#7c3aed]/20 transition active:scale-95 cursor-pointer"
-                  title="Descarga secuencialmente los 113 capítulos en IndexedDB para escuchar sin conexión"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>⬇️ Descargar audiolibro completo (113 capítulos)</span>
-                </button>
+                <div className="flex flex-wrap items-center justify-center gap-2 w-full">
+                  <button
+                    type="button"
+                    onClick={handleStartBulkDownload}
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#7c3aed] to-[#4f96fe] hover:from-[#6d28d9] hover:to-[#3b82f6] text-white text-xs font-black uppercase tracking-wider shadow-md shadow-[#7c3aed]/20 transition active:scale-95 cursor-pointer"
+                    title="Descarga secuencialmente los 113 capítulos en IndexedDB para escuchar sin conexión"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>⬇️ Descargar todos los capítulos (Modo sin conexión)</span>
+                  </button>
+
+                  {/* Guardar solo el capítulo actual */}
+                  {!offlineChapterNumbers.has(currentTrack.chapterNumber) && (
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadOffline(currentTrack.chapterNumber, currentTrack.title, currentTrack.filename)}
+                      disabled={downloadingChapterId === currentTrack.chapterNumber}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition cursor-pointer active:scale-95"
+                      title="Guardar este capítulo individual"
+                    >
+                      {downloadingChapterId === currentTrack.chapterNumber ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-[#7c3aed]" />
+                      ) : (
+                        <Download className="w-3.5 h-3.5 text-[#7c3aed]" />
+                      )}
+                      <span>Guardar capítulo actual</span>
+                    </button>
+                  )}
+                </div>
 
                 {offlineChapterNumbers.size > 0 && (
                   <span className="text-[11px] font-bold text-slate-500">

@@ -1,15 +1,15 @@
 /**
  * Módulo de Almacenamiento Seguro para el Libro Digital (PDF)
- * Base de datos IndexedDB: "bmc_pdf_offline"
+ * Base de datos IndexedDB: "bmc_pdf_store"
  * 
- * Permite descargar y guardar el ArrayBuffer del libro 101BMC.pdf en memoria IndexedDB,
+ * Permite descargar y guardar el ArrayBuffer del libro 101BMC.pdf en IndexedDB,
  * y cargarlo instantáneamente cuando no hay conexión a internet o se está en modo avión.
  */
 
 import { ref, getBlob, getBytes } from 'firebase/storage';
 import { storage } from '../firebase/config';
 
-const DB_NAME = 'bmc_pdf_offline';
+const DB_NAME = 'bmc_pdf_store';
 const DB_VERSION = 1;
 const STORE_PDF = 'pdf_store';
 const RECORD_KEY = '101BMC_PDF_FILE';
@@ -40,13 +40,13 @@ function openPdfDB(): Promise<IDBDatabase> {
     };
 
     request.onerror = () => {
-      reject(request.error || new Error('No se pudo abrir IndexedDB bmc_pdf_offline'));
+      reject(request.error || new Error('No se pudo abrir IndexedDB bmc_pdf_store'));
     };
   });
 }
 
 /**
- * Comprueba si el libro digital ya está guardado en IndexedDB
+ * Comprueba si el libro digital ya está guardado en IndexedDB "bmc_pdf_store"
  */
 export async function isPdfOfflineAvailable(): Promise<boolean> {
   try {
@@ -66,7 +66,7 @@ export async function isPdfOfflineAvailable(): Promise<boolean> {
 }
 
 /**
- * Guarda el ArrayBuffer del PDF en IndexedDB "bmc_pdf_offline"
+ * Guarda el ArrayBuffer del PDF en IndexedDB "bmc_pdf_store"
  */
 export async function savePdfOffline(arrayBuffer: ArrayBuffer): Promise<void> {
   const db = await openPdfDB();
@@ -86,7 +86,7 @@ export async function savePdfOffline(arrayBuffer: ArrayBuffer): Promise<void> {
 }
 
 /**
- * Obtiene el ArrayBuffer guardado en IndexedDB "bmc_pdf_offline"
+ * Obtiene el ArrayBuffer guardado en IndexedDB "bmc_pdf_store"
  */
 export async function getOfflinePdfData(): Promise<ArrayBuffer | null> {
   try {
@@ -131,8 +131,10 @@ export async function deleteOfflinePdf(): Promise<void> {
 }
 
 /**
- * Descarga los bytes del PDF utilizando getBlob() de Firebase Storage SDK
- * o XMLHttpRequest con responseType = 'arraybuffer' para evitar bloqueos de CORS.
+ * Descarga los bytes del PDF utilizando:
+ * 1. Firebase Storage SDK getBlob() / getBytes()
+ * 2. Fallback a corsproxy.io con encodeURIComponent para eludir CORS
+ * 3. Fallback a XMLHttpRequest con responseType = 'arraybuffer'
  */
 export async function fetchPdfBinary(pdfUrl?: string): Promise<ArrayBuffer> {
   // 1. Intentar con getBlob() / getBytes() del SDK oficial de Firebase Storage
@@ -141,19 +143,46 @@ export async function fetchPdfBinary(pdfUrl?: string): Promise<ArrayBuffer> {
     if (typeof window !== 'undefined' && typeof window.Blob !== 'undefined') {
       try {
         const blob = await getBlob(storageRef);
-        return await blob.arrayBuffer();
+        if (blob && blob.size > 1000) {
+          return await blob.arrayBuffer();
+        }
       } catch (blobErr) {
         console.warn('[OfflinePdf] getBlob aviso para 101BMC.pdf, probando getBytes:', blobErr);
       }
     }
     const bytes = await getBytes(storageRef);
-    return bytes;
+    if (bytes && bytes.byteLength > 1000) {
+      return bytes;
+    }
   } catch (sdkErr) {
     console.warn('[OfflinePdf] Firebase Storage SDK aviso:', sdkErr);
   }
 
-  // 2. Fallback a XMLHttpRequest con responseType = 'arraybuffer'
+  // 2. Intentar fetch directo con mode: 'cors'
   if (pdfUrl) {
+    try {
+      const resp = await fetch(pdfUrl, { mode: 'cors', cache: 'force-cache' });
+      if (resp.ok) {
+        const buf = await resp.arrayBuffer();
+        if (buf && buf.byteLength > 1000) return buf;
+      }
+    } catch (fetchErr) {
+      console.warn('[OfflinePdf] fetch directo falló por CORS, probando corsproxy.io:', fetchErr);
+    }
+
+    // 3. Fallback automático envolviendo con https://corsproxy.io/?
+    try {
+      const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(pdfUrl)}`;
+      const proxyResp = await fetch(proxyUrl);
+      if (proxyResp.ok) {
+        const buf = await proxyResp.arrayBuffer();
+        if (buf && buf.byteLength > 1000) return buf;
+      }
+    } catch (proxyErr) {
+      console.warn('[OfflinePdf] corsproxy.io fallo:', proxyErr);
+    }
+
+    // 4. Fallback a XMLHttpRequest con responseType = 'arraybuffer'
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open('GET', pdfUrl, true);

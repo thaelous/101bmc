@@ -152,7 +152,7 @@ export const BookReader: React.FC<BookReaderProps> = ({
         }
       }
 
-      // 2. Si no estaba offline o falló, cargar desde Firebase Storage
+      // 2. Si no estaba offline o falló, cargar desde Firebase Storage eludiendo CORS
       if (!loadingTask) {
         setDownloadProgressText('Conectando con el servidor...');
         let resolvedUrl = pdfUrl;
@@ -166,12 +166,33 @@ export const BookReader: React.FC<BookReaderProps> = ({
           throw new Error('No se pudo encontrar el libro digital en el servidor.');
         }
 
-        setDownloadProgressText('Preparando páginas...');
-        loadingTask = pdfjs.getDocument({
-          url: resolvedUrl,
-          cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
-          cMapPacked: true
-        });
+        setDownloadProgressText('Descargando páginas en memoria segura...');
+        // fetchPdfBinary utiliza SDK getBlob/getBytes, corsproxy.io y XHR para evitar bloqueo CORS
+        let arrayBuffer: ArrayBuffer | null = null;
+        try {
+          arrayBuffer = await fetchPdfBinary(resolvedUrl);
+        } catch (fetchErr) {
+          console.warn('[BookReader] fetchPdfBinary aviso, probando proxy directo:', fetchErr);
+        }
+
+        if (arrayBuffer && arrayBuffer.byteLength > 1000) {
+          // Guardar en IndexedDB ("bmc_pdf_store") para disponibilidad sin conexión
+          savePdfOffline(arrayBuffer).then(() => setIsOfflineSaved(true)).catch(() => {});
+
+          loadingTask = pdfjs.getDocument({
+            data: arrayBuffer,
+            cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
+            cMapPacked: true
+          });
+        } else {
+          // Si no se obtuvo buffer, cargar envolviendo con corsproxy.io
+          const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(resolvedUrl)}`;
+          loadingTask = pdfjs.getDocument({
+            url: proxyUrl,
+            cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
+            cMapPacked: true
+          });
+        }
       }
 
       const doc = await loadingTask.promise;
@@ -568,19 +589,19 @@ export const BookReader: React.FC<BookReaderProps> = ({
               />
             </div>
 
-            {/* Controles Flotantes para Navegación en Ojear */}
-            <div className="sticky bottom-2 mt-4 px-4 py-2 rounded-2xl bg-slate-900/90 backdrop-blur-md border border-white/10 flex items-center gap-3 shadow-2xl z-20">
+            {/* Controles Flotantes para Navegación en Ojear: Botones Grandes */}
+            <div className="sticky bottom-2 mt-4 px-4 sm:px-6 py-2.5 rounded-2xl bg-slate-900/90 backdrop-blur-md border border-white/10 flex items-center gap-4 sm:gap-6 shadow-2xl z-20">
               <button
                 type="button"
                 onClick={goToPrevPage}
                 disabled={currentPage <= 1 || isRenderingPage}
-                className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-[#7c3aed] text-white text-xs font-bold transition disabled:opacity-30 disabled:pointer-events-none active:scale-95 cursor-pointer"
+                className="px-4 sm:px-5 py-2.5 rounded-xl bg-white/10 hover:bg-[#7c3aed] text-white text-xs sm:text-sm font-bold transition disabled:opacity-30 disabled:pointer-events-none active:scale-95 cursor-pointer shadow-sm"
                 title="Página anterior"
               >
                 ◀ Anterior
               </button>
 
-              <span className="text-xs font-mono font-bold text-white px-2">
+              <span className="text-xs sm:text-sm font-mono font-bold text-white px-2 whitespace-nowrap">
                 Página {currentPage} de {totalPages || 223}
               </span>
 
@@ -588,7 +609,7 @@ export const BookReader: React.FC<BookReaderProps> = ({
                 type="button"
                 onClick={goToNextPage}
                 disabled={currentPage >= totalPages || isRenderingPage}
-                className="px-3 py-1.5 rounded-xl bg-[#7c3aed] hover:bg-[#6d28d9] text-white text-xs font-bold transition disabled:opacity-30 disabled:pointer-events-none active:scale-95 cursor-pointer shadow-md shadow-[#7c3aed]/30"
+                className="px-4 sm:px-5 py-2.5 rounded-xl bg-[#7c3aed] hover:bg-[#6d28d9] text-white text-xs sm:text-sm font-bold transition disabled:opacity-30 disabled:pointer-events-none active:scale-95 cursor-pointer shadow-md shadow-[#7c3aed]/30"
                 title="Página siguiente"
               >
                 Siguiente ▶
