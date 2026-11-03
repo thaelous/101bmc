@@ -15,13 +15,12 @@ import {
   Trash2, 
   CheckCircle2
 } from 'lucide-react';
-import { getDigitalBookEpubUrl } from '../firebase/config';
+import { getDigitalBookEpubBytes } from '../firebase/config';
 import { 
   isEpubOfflineAvailable, 
   saveEpubOffline, 
   getOfflineEpubData, 
-  deleteOfflineEpub, 
-  fetchEpubBinary 
+  deleteOfflineEpub 
 } from '../services/offlineEpubVault';
 
 interface BookReaderProps {
@@ -29,8 +28,8 @@ interface BookReaderProps {
   isSideBySide?: boolean;
 }
 
-// Creador seguro para ePub.js compatible con ESM y CJS
-const createEpubBook = (source: string | ArrayBuffer, options?: any): Book => {
+// Creador seguro para ePub.js compatible con ESM y CJS recibiendo ArrayBuffer en memoria
+const createEpubBook = (source: ArrayBuffer, options?: any): Book => {
   const factory: any = typeof ePub === 'function' ? ePub : (ePub as any).default;
   return factory(source, options);
 };
@@ -39,7 +38,6 @@ export const BookReader: React.FC<BookReaderProps> = ({
   userEmail,
   isSideBySide = false
 }) => {
-  const [epubUrl, setEpubUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -63,7 +61,7 @@ export const BookReader: React.FC<BookReaderProps> = ({
     isEpubOfflineAvailable().then(avail => setIsOfflineSaved(avail));
   }, []);
 
-  // Carga e inicialización segura del visor EPUB
+  // Carga directa del archivo EPUB mediante Firebase Storage SDK como ArrayBuffer
   const loadEpubBook = useCallback(async () => {
     setIsLoading(true);
     setError(null);
@@ -90,119 +88,96 @@ export const BookReader: React.FC<BookReaderProps> = ({
       }
       containerEl.innerHTML = '';
 
-      // 1. Verificar si existe en IndexedDB "bmc_epub_offline" (modo offline o modo avión)
+      // 1. Verificar si existe en IndexedDB "bmc_epub_offline" (modo offline o avión)
       const offlineAvailable = await isEpubOfflineAvailable();
       setIsOfflineSaved(offlineAvailable);
 
-      let bookSource: string | ArrayBuffer | null = null;
+      let epubBuffer: ArrayBuffer | null = null;
 
       if (offlineAvailable) {
         const offlineBuffer = await getOfflineEpubData();
         if (offlineBuffer && offlineBuffer.byteLength > 1000) {
-          bookSource = offlineBuffer;
+          epubBuffer = offlineBuffer;
         }
       }
 
-      // 2. Si no estaba offline, resolver la URL real de Firebase del EPUB ("101BMC.epub")
-      if (!bookSource) {
-        let rawFirebaseUrl = epubUrl;
-        if (!rawFirebaseUrl) {
-          const res = await getDigitalBookEpubUrl();
-          rawFirebaseUrl = res.url;
-          if (rawFirebaseUrl) setEpubUrl(rawFirebaseUrl);
-        }
-
-        if (!rawFirebaseUrl) {
-          throw new Error('No se pudo resolver la URL del archivo 101BMC.epub en Firebase Storage.');
-        }
-
-        // Envolver la URL real de Firebase con un proxy CORS para evitar el bloqueo del navegador
-        const proxiedEpubUrl = "https://corsproxy.io/?" + encodeURIComponent(rawFirebaseUrl);
-        bookSource = proxiedEpubUrl;
+      // 2. Si no estaba en IndexedDB, descargar bytes binarios directamente con Firebase Storage SDK
+      if (!epubBuffer) {
+        epubBuffer = await getDigitalBookEpubBytes();
       }
 
-      // Función auxiliar para renderizar e inicializar el Rendition en el contenedor
-      const renderBookInstance = async (book: Book) => {
-        bookRef.current = book;
-        if (!viewerContainerRef.current) return;
-        viewerContainerRef.current.innerHTML = '';
+      if (!epubBuffer || epubBuffer.byteLength < 1000) {
+        throw new Error('El archivo del libro digital no contiene datos válidos.');
+      }
 
-        const rendition = book.renderTo(viewerContainerRef.current, {
-          width: '100%',
-          height: '100%',
-          spread: 'auto',
-          flow: 'paginated'
-        });
-        renditionRef.current = rendition;
+      // 3. Inicializar ePub.js 100% en memoria con el ArrayBuffer (desempaquetado local sin CORS)
+      const book = createEpubBook(epubBuffer);
+      bookRef.current = book;
 
-        // Estilos tipográficos limpios y legibles
-        rendition.themes.default({
-          'body': {
-            'font-family': "'Plus Jakarta Sans', system-ui, sans-serif !important",
-            'color': '#0f2147 !important',
-            'background': '#ffffff !important',
-            'padding': '16px 20px !important',
-            'line-height': '1.65 !important'
-          },
-          'p': {
-            'font-size': '16px !important',
-            'line-height': '1.7 !important',
-            'margin-bottom': '1em !important'
-          },
-          'h1, h2, h3, h4': {
-            'font-family': "'Outfit', sans-serif !important",
-            'color': '#0f2147 !important',
-            'font-weight': '800 !important'
+      if (!viewerContainerRef.current) return;
+      viewerContainerRef.current.innerHTML = '';
+
+      const rendition = book.renderTo(viewerContainerRef.current, {
+        width: '100%',
+        height: '100%',
+        spread: 'auto',
+        flow: 'paginated'
+      });
+      renditionRef.current = rendition;
+
+      // Estilos tipográficos limpios y legibles
+      rendition.themes.default({
+        'body': {
+          'font-family': "'Plus Jakarta Sans', system-ui, sans-serif !important",
+          'color': '#0f2147 !important',
+          'background': '#ffffff !important',
+          'padding': '16px 20px !important',
+          'line-height': '1.65 !important'
+        },
+        'p': {
+          'font-size': '16px !important',
+          'line-height': '1.7 !important',
+          'margin-bottom': '1em !important'
+        },
+        'h1, h2, h3, h4': {
+          'font-family': "'Outfit', sans-serif !important",
+          'color': '#0f2147 !important',
+          'font-weight': '800 !important'
+        }
+      });
+
+      // Restaurar última página o posición leída
+      const savedLocation = localStorage.getItem('bmc_epub_last_location');
+      await rendition.display(savedLocation || undefined);
+
+      // Monitoreo de ubicación y avance
+      rendition.on('relocated', (location: any) => {
+        if (location && location.start) {
+          const cfi = location.start.cfi;
+          if (cfi) {
+            localStorage.setItem('bmc_epub_last_location', cfi);
           }
-        });
-
-        // Restaurar última página o posición leída
-        const savedLocation = localStorage.getItem('bmc_epub_last_location');
-        await rendition.display(savedLocation || undefined);
-
-        // Monitoreo de ubicación y avance
-        rendition.on('relocated', (location: any) => {
-          if (location && location.start) {
-            const cfi = location.start.cfi;
-            if (cfi) {
-              localStorage.setItem('bmc_epub_last_location', cfi);
-            }
-            if (location.start.displayed && location.start.displayed.page) {
-              setCurrentLocationLabel(`Página ${location.start.displayed.page} de ${location.start.displayed.total || ''}`);
-            } else if (location.start.index !== undefined) {
-              setCurrentLocationLabel(`Capítulo ${location.start.index + 1}`);
-            }
+          if (location.start.displayed && location.start.displayed.page) {
+            setCurrentLocationLabel(`Página ${location.start.displayed.page} de ${location.start.displayed.total || ''}`);
+          } else if (location.start.index !== undefined) {
+            setCurrentLocationLabel(`Capítulo ${location.start.index + 1}`);
           }
-        });
+        }
+      });
 
-        // Navegación con teclado en el iframe del libro
-        rendition.on('keyup', (e: KeyboardEvent) => {
-          if (e.key === 'ArrowLeft') goToPrev();
-          if (e.key === 'ArrowRight') goToNext();
-        });
-      };
-
-      // 3. Inicialización protegida con ePub(epubUrl) mediante corsproxy.io y fallback
-      try {
-        const book = createEpubBook(bookSource);
-        await renderBookInstance(book);
-      } catch (initialErr: any) {
-        console.warn('[BookReader] corsproxy.io aviso en carga inicial, probando respaldo binario:', initialErr?.message || initialErr);
-        const rawUrl = typeof bookSource === 'string' && bookSource.includes('corsproxy.io/?')
-          ? decodeURIComponent(bookSource.replace('https://corsproxy.io/?', ''))
-          : (typeof bookSource === 'string' ? bookSource : undefined);
-        const arrayBuffer = await fetchEpubBinary(rawUrl);
-        const fallbackBook = createEpubBook(arrayBuffer);
-        await renderBookInstance(fallbackBook);
-      }
+      // Navegación con teclado en el iframe del libro
+      rendition.on('keyup', (e: KeyboardEvent) => {
+        if (e.key === 'ArrowLeft') goToPrev();
+        if (e.key === 'ArrowRight') goToNext();
+      });
 
       setIsLoading(false);
     } catch (err: any) {
-      console.warn('[BookReader] Error de red o inicialización del EPUB:', err?.message || err);
+      console.warn('[BookReader] Error al cargar EPUB con Firebase Storage SDK:', err?.message || err);
       setIsLoading(false);
       setError('No se pudo abrir el libro digital. Por favor verifica tu conexión o haz clic en Reintentar.');
     }
-  }, [epubUrl]);
+  }, []);
 
   useEffect(() => {
     loadEpubBook();
@@ -248,9 +223,9 @@ export const BookReader: React.FC<BookReaderProps> = ({
   const handleSaveEpubOffline = async () => {
     try {
       setIsSavingOffline(true);
-      setSaveProgressText('Guardando libro en memoria local...');
+      setSaveProgressText('Descargando y guardando libro...');
 
-      const arrayBuffer = await fetchEpubBinary(epubUrl || undefined);
+      const arrayBuffer = await getDigitalBookEpubBytes();
       await saveEpubOffline(arrayBuffer);
       setIsOfflineSaved(true);
     } catch (err: any) {

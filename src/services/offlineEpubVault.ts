@@ -130,85 +130,11 @@ export async function deleteOfflineEpub(): Promise<void> {
   }
 }
 
+import { getDigitalBookEpubBytes } from '../firebase/config';
+
 /**
- * Descarga los bytes del EPUB utilizando Firebase Storage SDK, proxy local o proxy CORS
+ * Descarga los bytes del EPUB utilizando la SDK de Firebase Storage directamente.
  */
-export async function fetchEpubBinary(epubUrl?: string): Promise<ArrayBuffer> {
-  // 1. Firebase Storage SDK directo
-  try {
-    const storageRef = ref(storage, '101BMC.epub');
-    if (typeof window !== 'undefined' && typeof window.Blob !== 'undefined') {
-      try {
-        const blob = await getBlob(storageRef);
-        if (blob && blob.size > 1000) {
-          return await blob.arrayBuffer();
-        }
-      } catch {}
-    }
-    const bytes = await getBytes(storageRef);
-    if (bytes && bytes.byteLength > 1000) {
-      return bytes;
-    }
-  } catch (sdkErr) {
-    console.warn('[OfflineEpub] Firebase Storage SDK aviso para 101BMC.epub:', sdkErr);
-  }
-
-  // 2. Proxy local /api/proxy-media
-  if (epubUrl) {
-    try {
-      const localProxy = `/api/proxy-media?url=${encodeURIComponent(epubUrl)}`;
-      const resp = await fetch(localProxy);
-      if (resp.ok) {
-        const buf = await resp.arrayBuffer();
-        if (buf && buf.byteLength > 1000) return buf;
-      }
-    } catch {}
-
-    // 3. fetch directo con mode: 'cors'
-    try {
-      const resp = await fetch(epubUrl, { mode: 'cors', cache: 'force-cache' });
-      if (resp.ok) {
-        const buf = await resp.arrayBuffer();
-        if (buf && buf.byteLength > 1000) return buf;
-      }
-    } catch {}
-
-    // 4. allorigins.win
-    try {
-      const aoUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(epubUrl)}`;
-      const aoResp = await fetch(aoUrl);
-      if (aoResp.ok) {
-        const buf = await aoResp.arrayBuffer();
-        if (buf && buf.byteLength > 1000) return buf;
-      }
-    } catch {}
-
-    // 5. corsproxy.io
-    try {
-      const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(epubUrl)}`;
-      const proxyResp = await fetch(proxyUrl);
-      if (proxyResp.ok) {
-        const buf = await proxyResp.arrayBuffer();
-        if (buf && buf.byteLength > 1000) return buf;
-      }
-    } catch {}
-
-    // 6. XMLHttpRequest
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open('GET', epubUrl, true);
-      xhr.responseType = 'arraybuffer';
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300 && xhr.response) {
-          resolve(xhr.response as ArrayBuffer);
-        } else {
-          reject(new Error(`Error XHR ${xhr.status} al descargar EPUB`));
-        }
-      };
-      xhr.onerror = () => reject(new Error('Error de red en XHR para EPUB'));
-      xhr.send();
-    });
-  }
-
-  throw new Error('No se pudo descargar el archivo EPUB.');
+export async function fetchEpubBinary(): Promise<ArrayBuffer> {
+  return await getDigitalBookEpubBytes();
 }
