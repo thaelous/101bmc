@@ -103,20 +103,22 @@ export const BookReader: React.FC<BookReaderProps> = ({
         }
       }
 
-      // 2. Si no estaba offline, resolver la URL pública oficial de Firebase del EPUB ("101BMC.epub")
+      // 2. Si no estaba offline, resolver la URL real de Firebase del EPUB ("101BMC.epub")
       if (!bookSource) {
-        let resolvedUrl = epubUrl;
-        if (!resolvedUrl) {
+        let rawFirebaseUrl = epubUrl;
+        if (!rawFirebaseUrl) {
           const res = await getDigitalBookEpubUrl();
-          resolvedUrl = res.url;
-          if (resolvedUrl) setEpubUrl(resolvedUrl);
+          rawFirebaseUrl = res.url;
+          if (rawFirebaseUrl) setEpubUrl(rawFirebaseUrl);
         }
 
-        if (!resolvedUrl) {
+        if (!rawFirebaseUrl) {
           throw new Error('No se pudo resolver la URL del archivo 101BMC.epub en Firebase Storage.');
         }
 
-        bookSource = resolvedUrl;
+        // Envolver la URL real de Firebase con un proxy CORS para evitar el bloqueo del navegador
+        const proxiedEpubUrl = "https://corsproxy.io/?" + encodeURIComponent(rawFirebaseUrl);
+        bookSource = proxiedEpubUrl;
       }
 
       // Función auxiliar para renderizar e inicializar el Rendition en el contenedor
@@ -180,23 +182,25 @@ export const BookReader: React.FC<BookReaderProps> = ({
         });
       };
 
-      // 3. Inicialización protegida con fallback automático ante errores de red o CORS
+      // 3. Inicialización protegida con ePub(epubUrl) mediante corsproxy.io y fallback
       try {
         const book = createEpubBook(bookSource);
         await renderBookInstance(book);
       } catch (initialErr: any) {
-        console.warn('[BookReader] Aviso al cargar URL directa, probando binario en memoria:', initialErr?.message || initialErr);
-        // Fallback a ArrayBuffer descargado en memoria sin bloqueos de cabecera
-        const arrayBuffer = await fetchEpubBinary(typeof bookSource === 'string' ? bookSource : undefined);
-        const book = createEpubBook(arrayBuffer);
-        await renderBookInstance(book);
+        console.warn('[BookReader] corsproxy.io aviso en carga inicial, probando respaldo binario:', initialErr?.message || initialErr);
+        const rawUrl = typeof bookSource === 'string' && bookSource.includes('corsproxy.io/?')
+          ? decodeURIComponent(bookSource.replace('https://corsproxy.io/?', ''))
+          : (typeof bookSource === 'string' ? bookSource : undefined);
+        const arrayBuffer = await fetchEpubBinary(rawUrl);
+        const fallbackBook = createEpubBook(arrayBuffer);
+        await renderBookInstance(fallbackBook);
       }
 
       setIsLoading(false);
     } catch (err: any) {
       console.warn('[BookReader] Error de red o inicialización del EPUB:', err?.message || err);
-      setError('No se pudo abrir el libro digital. Por favor verifica tu conexión o haz clic en Reintentar.');
       setIsLoading(false);
+      setError('No se pudo abrir el libro digital. Por favor verifica tu conexión o haz clic en Reintentar.');
     }
   }, [epubUrl]);
 
