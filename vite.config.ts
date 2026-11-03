@@ -4,11 +4,45 @@ import path from 'path';
 import {defineConfig} from 'vite';
 import {VitePWA} from 'vite-plugin-pwa';
 
+function mediaProxyPlugin() {
+  return {
+    name: 'media-proxy-plugin',
+    configureServer(server: any) {
+      server.middlewares.use('/api/proxy-media', async (req: any, res: any) => {
+        try {
+          const urlObj = new URL(req.url, 'http://localhost:3000');
+          const targetUrl = urlObj.searchParams.get('url');
+          if (!targetUrl) {
+            res.statusCode = 400;
+            res.end('Missing target url');
+            return;
+          }
+          const response = await fetch(targetUrl);
+          if (!response.ok) {
+            res.statusCode = response.status;
+            res.end(`Fetch failed with status ${response.status}`);
+            return;
+          }
+          const contentType = response.headers.get('content-type') || 'application/octet-stream';
+          res.setHeader('Content-Type', contentType);
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          const arrayBuffer = await response.arrayBuffer();
+          res.end(Buffer.from(arrayBuffer));
+        } catch (err: any) {
+          res.statusCode = 500;
+          res.end(err.message || 'Error fetching media');
+        }
+      });
+    }
+  };
+}
+
 export default defineConfig(() => {
   return {
     plugins: [
       react(),
       tailwindcss(),
+      mediaProxyPlugin(),
       VitePWA({
         registerType: 'autoUpdate',
         includeAssets: ['logo.png', 'icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png'],

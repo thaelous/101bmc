@@ -95,7 +95,39 @@ export async function fetchAudioBlob(
     console.warn(`[AudioVault] Firebase Storage SDK aviso para ${storagePath}:`, sdkErr);
   }
 
-  // 2. Fallback con https://corsproxy.io/? + encodeURIComponent(audioUrl)
+  // 2. Intentar a través del proxy local de la aplicación (/api/proxy-media)
+  if (audioUrl) {
+    try {
+      const localProxyUrl = `/api/proxy-media?url=${encodeURIComponent(audioUrl)}`;
+      const localResp = await fetch(localProxyUrl);
+      if (localResp.ok) {
+        const blob = await localResp.blob();
+        if (blob && blob.size > 1000) {
+          return blob;
+        }
+      }
+    } catch (localErr) {
+      console.warn(`[AudioVault] Proxy local aviso para cap ${chapterNumber}:`, localErr);
+    }
+  }
+
+  // 3. Fallback con allorigins.win (proxy CORS de alta disponibilidad)
+  if (audioUrl) {
+    try {
+      const allOriginsUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(audioUrl)}`;
+      const aoResp = await fetch(allOriginsUrl);
+      if (aoResp.ok) {
+        const blob = await aoResp.blob();
+        if (blob && blob.size > 1000) {
+          return blob;
+        }
+      }
+    } catch (aoErr) {
+      console.warn(`[AudioVault] allorigins aviso para cap ${chapterNumber}:`, aoErr);
+    }
+  }
+
+  // 4. Fallback con https://corsproxy.io/? + encodeURIComponent(audioUrl)
   if (audioUrl) {
     try {
       const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(audioUrl)}`;
@@ -107,11 +139,11 @@ export async function fetchAudioBlob(
         }
       }
     } catch (proxyErr) {
-      console.warn(`[AudioVault] corsproxy.io fallo para cap ${chapterNumber}:`, proxyErr);
+      console.warn(`[AudioVault] corsproxy.io aviso para cap ${chapterNumber}:`, proxyErr);
     }
   }
 
-  // 3. Fallback a XMLHttpRequest con responseType = 'blob'
+  // 5. Fallback a XMLHttpRequest con responseType = 'blob'
   if (audioUrl) {
     try {
       const blob = await new Promise<Blob>((resolve, reject) => {
@@ -137,16 +169,19 @@ export async function fetchAudioBlob(
     }
   }
 
-  // 4. Fallback con Cache API nativa del navegador (caches.open('bmc-audios-offline-v1'))
+  // 6. Cache API nativa del navegador con mode: 'no-cors'
   if (audioUrl && typeof window !== 'undefined' && 'caches' in window) {
     try {
       const cache = await caches.open(CACHE_NAME);
       const req = new Request(audioUrl, { mode: 'no-cors' });
-      await cache.put(req, await fetch(audioUrl, { mode: 'no-cors' }));
+      const resp = await fetch(req);
+      await cache.put(req, resp);
       const match = await cache.match(req);
       if (match) {
-        const blob = await match.blob();
-        if (blob && blob.size > 0) return blob;
+        try {
+          const blob = await match.blob();
+          if (blob && blob.size > 0) return blob;
+        } catch {}
       }
     } catch (cacheErr) {
       console.warn(`[AudioVault] Cache API aviso para cap ${chapterNumber}:`, cacheErr);
