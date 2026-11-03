@@ -34,6 +34,7 @@ import {
   isChapterOfflineAvailable,
   getAllOfflineChapterNumbers,
   saveChapterForOffline,
+  saveChapterWithTimeout,
   getDecryptedChapterAudioUrl,
   deleteOfflineChapter
 } from '../services/offlineAudioVault';
@@ -232,19 +233,26 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         }
 
         let resolvedUrl: string | null = null;
-        const isOffline = await isChapterOfflineAvailable(currentTrack.chapterNumber);
+        let onlineUrl: string | null = null;
+        if (navigator.onLine) {
+          try {
+            onlineUrl = await getChapterAudioDownloadUrl(currentTrack.chapterNumber, currentTrack.filename);
+          } catch {}
+        }
 
-        // 1. Si está disponible en el almacén offline, obtener URL temporal
+        const isOffline = await isChapterOfflineAvailable(currentTrack.chapterNumber, onlineUrl || undefined);
+
+        // 1. Si está disponible en el almacén offline (IndexedDB o Cache API), obtener URL
         if (isOffline) {
-          resolvedUrl = await getDecryptedChapterAudioUrl(currentTrack.chapterNumber);
+          resolvedUrl = await getDecryptedChapterAudioUrl(currentTrack.chapterNumber, onlineUrl || undefined);
           if (resolvedUrl) {
             activeBlobUrlRef.current = resolvedUrl;
           }
         }
 
-        // 2. Si no está guardado offline y hay internet, obtener URL directa de Firebase Storage
-        if (!resolvedUrl && navigator.onLine) {
-          resolvedUrl = await getChapterAudioDownloadUrl(currentTrack.chapterNumber, currentTrack.filename);
+        // 2. Si no estaba guardado offline, usar onlineUrl
+        if (!resolvedUrl && onlineUrl) {
+          resolvedUrl = onlineUrl;
         }
 
         if (isCancelled) {
@@ -343,18 +351,25 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
       setIsLoadingAudioUrl(true);
       try {
         let url: string | null = null;
-        const isOffline = await isChapterOfflineAvailable(currentTrack.chapterNumber);
+        let onlineUrl: string | null = null;
+        if (navigator.onLine) {
+          try {
+            onlineUrl = await getChapterAudioDownloadUrl(currentTrack.chapterNumber, currentTrack.filename);
+          } catch {}
+        }
+
+        const isOffline = await isChapterOfflineAvailable(currentTrack.chapterNumber, onlineUrl || undefined);
 
         if (isOffline) {
-          url = await getDecryptedChapterAudioUrl(currentTrack.chapterNumber);
+          url = await getDecryptedChapterAudioUrl(currentTrack.chapterNumber, onlineUrl || undefined);
           if (url) {
             if (activeBlobUrlRef.current) URL.revokeObjectURL(activeBlobUrlRef.current);
             activeBlobUrlRef.current = url;
           }
         }
 
-        if (!url && navigator.onLine) {
-          url = await getChapterAudioDownloadUrl(currentTrack.chapterNumber, currentTrack.filename);
+        if (!url && onlineUrl) {
+          url = onlineUrl;
         }
 
         if (url && audioRef.current) {
@@ -446,16 +461,18 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
           audioUrl = await getChapterAudioDownloadUrl(track.chapterNumber, track.filename);
         } catch {}
 
-        await saveChapterForOffline(
+        // Timeout estricto de máximo 8s por archivo sin congelar jamás la barra
+        await saveChapterWithTimeout(
           track.chapterNumber,
           track.title,
           track.filename,
-          audioUrl
+          audioUrl,
+          8000
         );
 
         setOfflineChapterNumbers(prev => new Set([...prev, track.chapterNumber]));
       } catch (err) {
-        console.warn(`[BulkDownload] Error en capítulo ${track.chapterNumber}:`, err);
+        console.warn(`[BulkDownload] Fallo controlado en capítulo ${track.chapterNumber}:`, err);
       }
     }
 

@@ -152,9 +152,9 @@ export const BookReader: React.FC<BookReaderProps> = ({
         }
       }
 
-      // 2. Si no estaba offline o falló, cargar desde Firebase Storage eludiendo CORS
+      // 2. Si no estaba offline, cargar directamente por URL de streaming nativo
       if (!loadingTask) {
-        setDownloadProgressText('Conectando con el servidor...');
+        setDownloadProgressText('Conectando...');
         let resolvedUrl = pdfUrl;
         if (!resolvedUrl) {
           const res = await getDigitalBookPdfUrl();
@@ -166,36 +166,28 @@ export const BookReader: React.FC<BookReaderProps> = ({
           throw new Error('No se pudo encontrar el libro digital en el servidor.');
         }
 
-        setDownloadProgressText('Descargando páginas en memoria segura...');
-        // fetchPdfBinary utiliza SDK getBlob/getBytes, corsproxy.io y XHR para evitar bloqueo CORS
-        let arrayBuffer: ArrayBuffer | null = null;
-        try {
-          arrayBuffer = await fetchPdfBinary(resolvedUrl);
-        } catch (fetchErr) {
-          console.warn('[BookReader] fetchPdfBinary aviso, probando proxy directo:', fetchErr);
-        }
-
-        if (arrayBuffer && arrayBuffer.byteLength > 1000) {
-          // Guardar en IndexedDB ("bmc_pdf_store") para disponibilidad sin conexión
-          savePdfOffline(arrayBuffer).then(() => setIsOfflineSaved(true)).catch(() => {});
-
-          loadingTask = pdfjs.getDocument({
-            data: arrayBuffer,
-            cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
-            cMapPacked: true
-          });
-        } else {
-          // Si no se obtuvo buffer, cargar envolviendo con corsproxy.io
-          const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(resolvedUrl)}`;
-          loadingTask = pdfjs.getDocument({
-            url: proxyUrl,
-            cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
-            cMapPacked: true
-          });
-        }
+        // Carga por streaming nativo con PDF.js (renderiza la primera página de inmediato sin descargar todo de golpe)
+        loadingTask = pdfjs.getDocument({
+          url: resolvedUrl,
+          cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
+          cMapPacked: true
+        });
       }
 
-      const doc = await loadingTask.promise;
+      let doc: any = null;
+      try {
+        doc = await loadingTask.promise;
+      } catch (streamErr) {
+        console.warn('[BookReader] Fallo streaming directo, probando vía proxy:', streamErr);
+        const fallbackUrl = `/api/proxy-media?url=${encodeURIComponent(pdfUrl || '')}`;
+        const proxyTask = pdfjs.getDocument({
+          url: fallbackUrl,
+          cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
+          cMapPacked: true
+        });
+        doc = await proxyTask.promise;
+      }
+
       setPdfDoc(doc);
       const total = doc.numPages || 223;
       setTotalPages(total);
