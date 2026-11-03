@@ -1,28 +1,27 @@
 /**
- * Módulo de Almacenamiento Seguro Local para el Libro Digital (PDF Vault)
+ * Módulo de Almacenamiento Seguro para el Libro Digital (PDF)
  * Base de datos IndexedDB: "bmc_pdf_offline"
- * Algoritmo: Web Crypto API nativa AES-GCM (256 bits)
- * Clave: Derivada criptográficamente del identificador/correo del usuario en localStorage.
  * 
- * Cumplimiento estricto:
- * - Cero descargas hacia el sistema de archivos del usuario.
- * - Almacenamiento 100% cifrado dentro de IndexedDB "bmc_pdf_offline".
- * - Desencriptado al vuelo en memoria RAM cuando se lee sin conexión o en modo avión.
+ * Permite descargar y guardar el ArrayBuffer del libro 101BMC.pdf en memoria IndexedDB,
+ * y cargarlo instantáneamente cuando no hay conexión a internet o se está en modo avión.
  */
+
+import { ref, getBlob, getBytes } from 'firebase/storage';
+import { storage } from '../firebase/config';
 
 const DB_NAME = 'bmc_pdf_offline';
 const DB_VERSION = 1;
 const STORE_PDF = 'pdf_store';
-const RECORD_KEY = '101BMC_ENCRYPTED_PDF';
+const RECORD_KEY = '101BMC_PDF_FILE';
 
 let dbInstance: IDBDatabase | null = null;
 
-function openPdfVaultDB(): Promise<IDBDatabase> {
+function openPdfDB(): Promise<IDBDatabase> {
   if (dbInstance) return Promise.resolve(dbInstance);
 
   return new Promise((resolve, reject) => {
     if (typeof window === 'undefined' || !window.indexedDB) {
-      reject(new Error('IndexedDB no está soportado en este navegador.'));
+      reject(new Error('IndexedDB no está disponible en este entorno.'));
       return;
     }
 
@@ -41,158 +40,135 @@ function openPdfVaultDB(): Promise<IDBDatabase> {
     };
 
     request.onerror = () => {
-      reject(request.error || new Error('No se pudo abrir la base de datos IndexedDB bmc_pdf_offline'));
+      reject(request.error || new Error('No se pudo abrir IndexedDB bmc_pdf_offline'));
     };
   });
 }
 
 /**
- * Deriva la CryptoKey AES-GCM (256 bits) utilizando el identificador o correo
- * del usuario en localStorage.
- */
-async function getUserCryptoKey(userEmailOrId?: string): Promise<CryptoKey> {
-  let identifier: string | null | undefined = userEmailOrId;
-  if (!identifier && typeof localStorage !== 'undefined') {
-    identifier = localStorage.getItem('bmc_acceso_autorizado') || localStorage.getItem('bmc_usuario_actual') || undefined;
-  }
-  if (!identifier) {
-    identifier = 'bmc_lector_autorizado_vault';
-  }
-
-  const enc = new TextEncoder();
-  const keyMaterial = enc.encode(identifier.trim().toLowerCase() + '_bmc_pdf_vault_salt');
-  const hashBuffer = await window.crypto.subtle.digest('SHA-256', keyMaterial);
-
-  return window.crypto.subtle.importKey(
-    'raw',
-    hashBuffer,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['encrypt', 'decrypt']
-  );
-}
-
-export interface EncryptedPdfRecord {
-  id: string;
-  iv: Uint8Array;
-  encryptedBuffer: ArrayBuffer;
-  savedAt: number;
-  sizeBytes: number;
-}
-
-/**
- * Verifica si el libro PDF completo está guardado en IndexedDB "bmc_pdf_offline"
+ * Comprueba si el libro digital ya está guardado en IndexedDB
  */
 export async function isPdfOfflineAvailable(): Promise<boolean> {
   try {
-    const db = await openPdfVaultDB();
+    const db = await openPdfDB();
     return new Promise((resolve) => {
       const tx = db.transaction(STORE_PDF, 'readonly');
       const store = tx.objectStore(STORE_PDF);
       const req = store.get(RECORD_KEY);
 
-      req.onsuccess = () => resolve(!!req.result);
+      req.onsuccess = () => resolve(!!req.result && !!req.result.data);
       req.onerror = () => resolve(false);
     });
   } catch (err) {
-    console.warn('[OfflinePdfVault] Error al verificar PDF offline:', err);
+    console.warn('[OfflinePdf] Error comprobando estado offline:', err);
     return false;
   }
 }
 
 /**
- * Cifra en memoria el ArrayBuffer del PDF con AES-GCM y lo guarda en IndexedDB "bmc_pdf_offline"
+ * Guarda el ArrayBuffer del PDF en IndexedDB "bmc_pdf_offline"
  */
-export async function savePdfForOffline(
-  pdfBytes: ArrayBuffer,
-  onProgress?: (progressPercent: number) => void,
-  userEmailOrId?: string
-): Promise<void> {
-  if (onProgress) onProgress(10);
-  const db = await openPdfVaultDB();
-  const key = await getUserCryptoKey(userEmailOrId);
-
-  if (onProgress) onProgress(30);
-
-  // Generar IV de 12 bytes para AES-GCM
-  const iv = new Uint8Array(12);
-  window.crypto.getRandomValues(iv);
-
-  if (onProgress) onProgress(50);
-
-  // Cifrado simétrico AES-GCM
-  const encryptedBuffer = await window.crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv: iv as unknown as BufferSource },
-    key,
-    pdfBytes
-  );
-
-  if (onProgress) onProgress(80);
-
-  const record: EncryptedPdfRecord = {
-    id: RECORD_KEY,
-    iv,
-    encryptedBuffer,
-    savedAt: Date.now(),
-    sizeBytes: encryptedBuffer.byteLength
-  };
-
-  await new Promise<void>((resolve, reject) => {
+export async function savePdfOffline(arrayBuffer: ArrayBuffer): Promise<void> {
+  const db = await openPdfDB();
+  return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_PDF, 'readwrite');
     const store = tx.objectStore(STORE_PDF);
-    const req = store.put(record);
+    const req = store.put({
+      id: RECORD_KEY,
+      data: arrayBuffer,
+      savedAt: Date.now(),
+      byteLength: arrayBuffer.byteLength
+    });
 
     req.onsuccess = () => resolve();
     req.onerror = () => reject(req.error);
   });
-
-  if (onProgress) onProgress(100);
 }
 
 /**
- * Desencripta al vuelo los bytes del PDF almacenados en IndexedDB "bmc_pdf_offline"
+ * Obtiene el ArrayBuffer guardado en IndexedDB "bmc_pdf_offline"
  */
-export async function getDecryptedPdfBytes(userEmailOrId?: string): Promise<ArrayBuffer | null> {
+export async function getOfflinePdfData(): Promise<ArrayBuffer | null> {
   try {
-    const db = await openPdfVaultDB();
-    const record = await new Promise<EncryptedPdfRecord | null>((resolve, reject) => {
+    const db = await openPdfDB();
+    return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_PDF, 'readonly');
       const store = tx.objectStore(STORE_PDF);
       const req = store.get(RECORD_KEY);
 
-      req.onsuccess = () => resolve(req.result || null);
+      req.onsuccess = () => {
+        if (req.result && req.result.data) {
+          resolve(req.result.data as ArrayBuffer);
+        } else {
+          resolve(null);
+        }
+      };
       req.onerror = () => reject(req.error);
     });
-
-    if (!record || !record.encryptedBuffer) {
-      return null;
-    }
-
-    const key = await getUserCryptoKey(userEmailOrId);
-    const decryptedBuffer = await window.crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: record.iv as unknown as BufferSource },
-      key,
-      record.encryptedBuffer
-    );
-
-    return decryptedBuffer;
   } catch (err) {
-    console.warn('[OfflinePdfVault] Error al desencriptar PDF offline:', err);
+    console.warn('[OfflinePdf] Error leyendo PDF desde IndexedDB:', err);
     return null;
   }
 }
 
 /**
- * Elimina el libro digital de IndexedDB
+ * Elimina el libro de IndexedDB
  */
 export async function deleteOfflinePdf(): Promise<void> {
-  const db = await openPdfVaultDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_PDF, 'readwrite');
-    const store = tx.objectStore(STORE_PDF);
-    const req = store.delete(RECORD_KEY);
+  try {
+    const db = await openPdfDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_PDF, 'readwrite');
+      const store = tx.objectStore(STORE_PDF);
+      const req = store.delete(RECORD_KEY);
 
-    req.onsuccess = () => resolve();
-    req.onerror = () => reject(req.error);
-  });
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  } catch (err) {
+    console.warn('[OfflinePdf] Error eliminando PDF:', err);
+  }
+}
+
+/**
+ * Descarga los bytes del PDF utilizando getBlob() de Firebase Storage SDK
+ * o XMLHttpRequest con responseType = 'arraybuffer' para evitar bloqueos de CORS.
+ */
+export async function fetchPdfBinary(pdfUrl?: string): Promise<ArrayBuffer> {
+  // 1. Intentar con getBlob() / getBytes() del SDK oficial de Firebase Storage
+  try {
+    const storageRef = ref(storage, '101BMC.pdf');
+    if (typeof window !== 'undefined' && typeof window.Blob !== 'undefined') {
+      try {
+        const blob = await getBlob(storageRef);
+        return await blob.arrayBuffer();
+      } catch (blobErr) {
+        console.warn('[OfflinePdf] getBlob aviso para 101BMC.pdf, probando getBytes:', blobErr);
+      }
+    }
+    const bytes = await getBytes(storageRef);
+    return bytes;
+  } catch (sdkErr) {
+    console.warn('[OfflinePdf] Firebase Storage SDK aviso:', sdkErr);
+  }
+
+  // 2. Fallback a XMLHttpRequest con responseType = 'arraybuffer'
+  if (pdfUrl) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('GET', pdfUrl, true);
+      xhr.responseType = 'arraybuffer';
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(xhr.response as ArrayBuffer);
+        } else {
+          reject(new Error(`Error XHR ${xhr.status} al descargar PDF`));
+        }
+      };
+      xhr.onerror = () => reject(new Error('Error de red en XHR para PDF'));
+      xhr.send();
+    });
+  }
+
+  throw new Error('No se pudo descargar el archivo PDF.');
 }

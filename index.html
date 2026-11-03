@@ -32,11 +32,7 @@
 
     <!-- PDF.js para renderizado canvas de alto rendimiento y paso de página en móviles -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <script>
-      if (typeof window !== 'undefined' && window.pdfjsLib) {
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-      }
-    </script>
+    <script>pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';</script>
   </head>
   <body class="min-h-screen text-slate-800 antialiased selection:bg-[#7c3aed]/20 selection:text-[#7c3aed]" style="background: linear-gradient(135deg, #4f96fe 0%, #1e5ad9 100%); background-attachment: fixed;">
     <div id="root"></div>

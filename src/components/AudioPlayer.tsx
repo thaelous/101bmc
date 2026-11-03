@@ -73,19 +73,16 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const [sleepTimerMinutes, setSleepTimerMinutes] = useState<number | null>(null);
   const [sleepTimerRemaining, setSleepTimerRemaining] = useState<number | null>(null);
 
-  // Estados para modo offline y cifrado local en navegador (IndexedDB bmc_audio_offline)
+  // Estados para modo offline en IndexedDB ("bmc_audios_db")
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [offlineChapterNumbers, setOfflineChapterNumbers] = useState<Set<number>>(new Set());
   const [downloadingChapterId, setDownloadingChapterId] = useState<number | null>(null);
   const [downloadProgress, setDownloadProgress] = useState(0);
 
-  // Estados para Descarga Masiva del Audiolibro Completo (113 capítulos)
+  // Estados para descarga masiva de los 113 capítulos
   const [isBulkDownloading, setIsBulkDownloading] = useState(false);
-  const [isBulkPaused, setIsBulkPaused] = useState(false);
-  const [bulkCurrentIndex, setBulkCurrentIndex] = useState(0);
-  const [showBulkModal, setShowBulkModal] = useState(false);
-  const isBulkCancelledRef = useRef(false);
-  const isBulkPausedRef = useRef(false);
+  const [bulkProgress, setBulkProgress] = useState<{ current: number; total: number; percent: number; chapterTitle: string } | null>(null);
+  const bulkCancelRef = useRef<boolean>(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const activeBlobUrlRef = useRef<string | null>(null);
@@ -237,9 +234,9 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         let resolvedUrl: string | null = null;
         const isOffline = await isChapterOfflineAvailable(currentTrack.chapterNumber);
 
-        // 1. Si está disponible en el almacén offline cifrado, descifrar al vuelo en memoria
+        // 1. Si está disponible en el almacén offline, obtener URL temporal
         if (isOffline) {
-          resolvedUrl = await getDecryptedChapterAudioUrl(currentTrack.chapterNumber, userEmail);
+          resolvedUrl = await getDecryptedChapterAudioUrl(currentTrack.chapterNumber);
           if (resolvedUrl) {
             activeBlobUrlRef.current = resolvedUrl;
           }
@@ -349,7 +346,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         const isOffline = await isChapterOfflineAvailable(currentTrack.chapterNumber);
 
         if (isOffline) {
-          url = await getDecryptedChapterAudioUrl(currentTrack.chapterNumber, userEmail);
+          url = await getDecryptedChapterAudioUrl(currentTrack.chapterNumber);
           if (url) {
             if (activeBlobUrlRef.current) URL.revokeObjectURL(activeBlobUrlRef.current);
             activeBlobUrlRef.current = url;
@@ -392,24 +389,21 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const handleDownloadOffline = async (chapterNumber: number, title: string, filename: string) => {
     try {
       setDownloadingChapterId(chapterNumber);
-      setDownloadProgress(15);
+      setDownloadProgress(0);
 
-      let audioUrl = '';
+      let audioUrl: string | undefined = undefined;
       try {
         audioUrl = await getChapterAudioDownloadUrl(chapterNumber, filename);
-      } catch {
-        // saveChapterForOffline usará getChapterAudioBytes directo para eludir CORS
-      }
+      } catch {}
 
       await saveChapterForOffline(
         chapterNumber,
         title,
         filename,
-        audioUrl || undefined,
+        audioUrl,
         (pct) => {
           setDownloadProgress(pct);
-        },
-        userEmail
+        }
       );
 
       setOfflineChapterNumbers(prev => new Set([...prev, chapterNumber]));
@@ -422,81 +416,57 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     }
   };
 
-  // Descarga Masiva del Audiolibro Completo (113 capítulos secuenciales)
+  // Descarga masiva secuencial de los 113 capítulos de audio
   const handleStartBulkDownload = async () => {
-    if (isBulkDownloading) {
-      setShowBulkModal(true);
-      return;
-    }
-
     setIsBulkDownloading(true);
-    setIsBulkPaused(false);
-    setShowBulkModal(true);
-    isBulkCancelledRef.current = false;
-    isBulkPausedRef.current = false;
+    bulkCancelRef.current = false;
+    const total = tracks.length;
 
-    // Procesar de 1 en 1 para proteger ancho de banda y memoria RAM
-    for (let i = 0; i < tracks.length; i++) {
-      if (isBulkCancelledRef.current) break;
-
-      // Pausa interactiva
-      while (isBulkPausedRef.current && !isBulkCancelledRef.current) {
-        await new Promise(resolve => setTimeout(resolve, 350));
+    for (let i = 0; i < total; i++) {
+      if (bulkCancelRef.current) {
+        break;
       }
-      if (isBulkCancelledRef.current) break;
 
       const track = tracks[i];
-      setBulkCurrentIndex(i + 1);
+      setBulkProgress({
+        current: i + 1,
+        total,
+        percent: Math.round(((i + 1) / total) * 100),
+        chapterTitle: track.title
+      });
 
-      // Si ya está guardado en IndexedDB bmc_audio_offline, omitir
+      // Si ya está guardado en IndexedDB, avanzar al siguiente
       if (offlineChapterNumbers.has(track.chapterNumber)) {
         continue;
       }
 
       try {
-        setDownloadingChapterId(track.chapterNumber);
-        setDownloadProgress(20);
-
-        let audioUrl = '';
+        let audioUrl: string | undefined = undefined;
         try {
           audioUrl = await getChapterAudioDownloadUrl(track.chapterNumber, track.filename);
-        } catch {
-          // getChapterAudioBytes lo obtendrá del SDK
-        }
+        } catch {}
 
         await saveChapterForOffline(
           track.chapterNumber,
           track.title,
           track.filename,
-          audioUrl || undefined,
-          (pct) => setDownloadProgress(pct),
-          userEmail
+          audioUrl
         );
 
         setOfflineChapterNumbers(prev => new Set([...prev, track.chapterNumber]));
-      } catch (err: any) {
-        console.warn(`[AudioPlayer] Fallo al guardar capítulo ${track.chapterNumber} en cola masiva:`, err);
-      } finally {
-        setDownloadingChapterId(null);
-        setDownloadProgress(0);
+      } catch (err) {
+        console.warn(`[BulkDownload] Error en capítulo ${track.chapterNumber}:`, err);
       }
     }
 
     setIsBulkDownloading(false);
-    setIsBulkPaused(false);
+    setBulkProgress(null);
   };
 
-  const handlePauseResumeBulk = () => {
-    isBulkPausedRef.current = !isBulkPausedRef.current;
-    setIsBulkPaused(isBulkPausedRef.current);
-  };
-
-  const handleCancelBulk = () => {
-    isBulkCancelledRef.current = true;
-    isBulkPausedRef.current = false;
+  const handleCancelBulkDownload = () => {
+    bulkCancelRef.current = true;
     setIsBulkDownloading(false);
-    setIsBulkPaused(false);
-    setShowBulkModal(false);
+    setBulkProgress(null);
   };
 
   const handleDeleteOffline = async (chapterNumber: number) => {
@@ -834,51 +804,59 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             </div>
           </div>
 
-          {/* Botón Descarga Masiva del Audiolibro Completo (113 capítulos) */}
-          <div className="mt-3.5 pt-3 border-t border-slate-100 flex flex-col items-center justify-center gap-1.5">
-            {tracks.length > 0 && offlineChapterNumbers.size >= tracks.length ? (
-              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200/80 text-[11px] font-bold shadow-2xs">
-                <span>✅ Audiolibro listo para usar sin conexión</span>
-                <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-md font-mono">113/113</span>
-              </div>
-            ) : isBulkDownloading ? (
-              <button
-                type="button"
-                onClick={() => setShowBulkModal(true)}
-                className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-[#7c3aed]/10 hover:bg-[#7c3aed]/20 text-[#7c3aed] border border-[#7c3aed]/20 text-[11px] font-bold cursor-pointer transition shadow-2xs"
-              >
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-[#7c3aed]" />
-                <span>
-                  Guardando audiolibro: Capítulo {bulkCurrentIndex} de 113 ({Math.round((bulkCurrentIndex / 113) * 100)}%)
-                </span>
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={handleStartBulkDownload}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#7c3aed] hover:bg-[#6d28d9] text-white text-[11px] font-bold transition active:scale-95 cursor-pointer shadow-md shadow-[#7c3aed]/25"
-                title="Descarga y cifra los 113 capítulos de 1 en 1 para escuchar sin conexión"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>⬇️ Descargar audiolibro completo (113 capítulos)</span>
-              </button>
-            )}
+          {/* Botón Masivo Oficial: ⬇️ Descargar audiolibro completo (113 capítulos) */}
+          <div className="mt-4 pt-3.5 border-t border-slate-100 flex flex-col items-center justify-center gap-2">
+            {isBulkDownloading && bulkProgress ? (
+              <div className="w-full max-w-md p-3.5 rounded-2xl bg-[#7c3aed]/10 border border-[#7c3aed]/25 flex flex-col gap-2">
+                <div className="flex items-center justify-between text-xs font-bold text-[#7c3aed]">
+                  <span className="flex items-center gap-1.5">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Descargando audiolibro: Capítulo {bulkProgress.current} de {bulkProgress.total}</span>
+                  </span>
+                  <span>{bulkProgress.percent}%</span>
+                </div>
+                
+                {/* Barra de progreso visual */}
+                <div className="w-full bg-slate-200/80 rounded-full h-2 overflow-hidden">
+                  <div 
+                    className="bg-gradient-to-r from-[#7c3aed] to-[#4f96fe] h-full transition-all duration-300 rounded-full"
+                    style={{ width: `${bulkProgress.percent}%` }}
+                  />
+                </div>
 
-            {/* Estado discreto del capítulo actual si ya está guardado */}
-            {offlineChapterNumbers.has(currentTrack.chapterNumber) && offlineChapterNumbers.size < tracks.length && (
-              <div className="flex items-center gap-1.5 text-[10px] text-emerald-700 font-medium">
-                <span>✅ Capítulo actual guardado en dispositivo</span>
+                <div className="flex items-center justify-between text-[11px] text-slate-500">
+                  <span className="truncate max-w-[220px] font-medium">{bulkProgress.chapterTitle}</span>
+                  <button
+                    type="button"
+                    onClick={handleCancelBulkDownload}
+                    className="text-red-600 hover:text-red-700 font-bold px-2 py-0.5 rounded hover:bg-red-50 transition cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            ) : offlineChapterNumbers.size >= 113 ? (
+              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-bold shadow-2xs">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                <span>✅ Audiolibro listo para usar sin conexión (113 capítulos)</span>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-2 w-full">
                 <button
                   type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDeleteOffline(currentTrack.chapterNumber);
-                  }}
-                  className="text-slate-400 hover:text-red-500 ml-0.5 p-0.5 rounded transition"
-                  title="Eliminar este capítulo de la memoria local"
+                  onClick={handleStartBulkDownload}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#7c3aed] to-[#4f96fe] hover:from-[#6d28d9] hover:to-[#3b82f6] text-white text-xs font-black uppercase tracking-wider shadow-md shadow-[#7c3aed]/20 transition active:scale-95 cursor-pointer"
+                  title="Descarga secuencialmente los 113 capítulos en IndexedDB para escuchar sin conexión"
                 >
-                  <Trash2 className="w-3 h-3" />
+                  <Download className="w-4 h-4" />
+                  <span>⬇️ Descargar audiolibro completo (113 capítulos)</span>
                 </button>
+
+                {offlineChapterNumbers.size > 0 && (
+                  <span className="text-[11px] font-bold text-slate-500">
+                    {offlineChapterNumbers.size} de 113 capítulos guardados en el dispositivo
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -1069,107 +1047,6 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
               101 Buenos Malos Consejos &bull; Robert Pacheco
             </div>
 
-          </div>
-        </div>
-      )}
-
-      {/* Modal de Progreso de Descarga Masiva del Audiolibro (113 Capítulos) */}
-      {showBulkModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 flex flex-col gap-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2.5 rounded-xl bg-[#7c3aed]/10 text-[#7c3aed]">
-                  <Download className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-black text-[#0f2147] uppercase tracking-wide">
-                    {tracks.length > 0 && offlineChapterNumbers.size >= tracks.length ? 'Audiolibro Listo' : 'Descarga en Memoria Cifrada'}
-                  </h3>
-                  <p className="text-xs text-slate-500 font-medium">
-                    101 Buenos Malos Consejos &bull; 113 Capítulos
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowBulkModal(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 transition cursor-pointer"
-                title="Cerrar modal"
-              >
-                ✕
-              </button>
-            </div>
-
-            {tracks.length > 0 && offlineChapterNumbers.size >= tracks.length ? (
-              <div className="py-4 text-center flex flex-col items-center gap-2">
-                <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center text-2xl font-bold">
-                  ✅
-                </div>
-                <h4 className="text-base font-bold text-[#0f2147]">
-                  Audiolibro listo para usar sin conexión
-                </h4>
-                <p className="text-xs text-slate-600 max-w-xs">
-                  Los 113 capítulos se encuentran cifrados con AES-GCM en la memoria segura (IndexedDB). Puedes reproducirlos sin internet o en modo avión.
-                </p>
-              </div>
-            ) : (
-              <div className="flex flex-col gap-3 py-2">
-                <div className="flex justify-between items-baseline text-xs font-bold text-[#0f2147]">
-                  <span>
-                    Guardando audiolibro: Capítulo {bulkCurrentIndex} de 113
-                  </span>
-                  <span className="font-mono text-[#7c3aed]">
-                    {Math.round((bulkCurrentIndex / 113) * 100)}%
-                  </span>
-                </div>
-
-                {/* Barra de progreso visual */}
-                <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden p-0.5 border border-slate-200">
-                  <div
-                    className="h-full bg-gradient-to-r from-[#7c3aed] to-[#4f96fe] rounded-full transition-all duration-300"
-                    style={{ width: `${Math.min(100, Math.round((bulkCurrentIndex / 113) * 100))}%` }}
-                  />
-                </div>
-
-                <div className="text-[11px] text-slate-500 truncate font-medium bg-slate-50 p-2 rounded-xl border border-slate-100">
-                  {tracks[bulkCurrentIndex - 1]?.title || 'Procesando capítulos en cola de 1 en 1...'}
-                </div>
-
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Los audios se cifran de 1 en 1 con Web Crypto API (AES-GCM) dentro de IndexedDB sin descargas normales ni archivos expuestos.
-                </p>
-              </div>
-            )}
-
-            {/* Botones de acción del Modal */}
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-              {isBulkDownloading && (
-                <>
-                  <button
-                    type="button"
-                    onClick={handlePauseResumeBulk}
-                    className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-[#0f2147] text-xs font-bold transition cursor-pointer"
-                  >
-                    {isBulkPaused ? '▶️ Reanudar' : '⏸️ Pausar'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleCancelBulk}
-                    className="px-4 py-2 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 text-xs font-bold transition cursor-pointer"
-                  >
-                    ❌ Cancelar
-                  </button>
-                </>
-              )}
-              <button
-                type="button"
-                onClick={() => setShowBulkModal(false)}
-                className="px-4 py-2 rounded-xl bg-[#7c3aed] hover:bg-[#6d28d9] text-white text-xs font-bold transition shadow-sm cursor-pointer"
-              >
-                {isBulkDownloading ? 'Continuar en segundo plano' : 'Entendido'}
-              </button>
-            </div>
           </div>
         </div>
       )}
