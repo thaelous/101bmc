@@ -1,5 +1,5 @@
 // Service Worker for 101 Buenos Malos Consejos PWA
-const CACHE_NAME = 'consejos-pwa-v1';
+const CACHE_NAME = 'consejos-pwa-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -42,9 +42,9 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Network-first for Firestore and API, Cache-first for static fonts, assets and local EPUB
+  // Network-first for Firestore and API, Cache-first for static fonts, assets, local EPUB and PDF
   const isStatic = event.request.url.includes('/fonts.') ||
-                   event.request.url.match(/\.(png|svg|ico|jpg|jpeg|woff2?|epub)$/);
+                   event.request.url.match(/\.(png|svg|ico|jpg|jpeg|woff2?|epub|pdf)$/);
 
   if (isStatic) {
     event.respondWith(
