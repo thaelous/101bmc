@@ -38,7 +38,6 @@ import {
 } from 'firebase/storage';
 import { CodigoDocument, UserProfile, AudioTrackItem } from '../types';
 import { getOfficialAudioTracks, OFFICIAL_113_CHAPTERS, titulosOficiales } from '../data/chaptersData';
-import { fetchGoogleDriveEpubArrayBuffer, GOOGLE_DRIVE_EPUB_DIRECT_URL } from '../services/googleDriveEpub';
 
 // ============================================================================
 // CONFIGURACIÓN OFICIAL DE FIREBASE (libros-1f750)
@@ -876,22 +875,22 @@ export async function getChapterAudioDownloadUrl(
 }
 
 // ============================================================================
-// LIBRO DIGITAL EPUB: DESCARGA EXCLUSIVA DESDE GOOGLE DRIVE
-// Se elimina por completo cualquier fetch hacia Firebase Storage para 101BMC.epub
+// LIBRO DIGITAL EPUB: CARGA LOCAL DIRECTA DESDE LA CARPETA PUBLIC
 // ============================================================================
 
 /**
- * Retorna la URL oficial de descarga directa de Google Drive para 101BMC.epub
+ * Retorna la ruta relativa limpia del archivo local /101BMC.epub
  */
 export async function getDigitalBookEpubUrl(): Promise<{ url: string | null; error?: string }> {
-  return { url: GOOGLE_DRIVE_EPUB_DIRECT_URL };
+  return { url: '/101BMC.epub' };
 }
 
 /**
- * Obtiene los bytes binarios de 101BMC.epub exclusivamente desde Google Drive (ArrayBuffer)
+ * Obtiene los bytes binarios de 101BMC.epub directamente desde la ruta local de la aplicación
  */
 export async function getDigitalBookEpubBytes(): Promise<ArrayBuffer> {
-  return await fetchGoogleDriveEpubArrayBuffer();
+  const resp = await fetch('/101BMC.epub');
+  return await resp.arrayBuffer();
 }
 
 /**

@@ -42,9 +42,9 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Network-first for Firestore and API, Cache-first for static fonts and assets
+  // Network-first for Firestore and API, Cache-first for static fonts, assets and local EPUB
   const isStatic = event.request.url.includes('/fonts.') ||
-                   event.request.url.match(/\.(png|svg|ico|jpg|jpeg|woff2?)$/);
+                   event.request.url.match(/\.(png|svg|ico|jpg|jpeg|woff2?|epub)$/);
 
   if (isStatic) {
     event.respondWith(

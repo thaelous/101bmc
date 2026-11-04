@@ -6,12 +6,10 @@
  * y cargarlo instantáneamente mediante ePub(objectUrl) desde un Blob local incluso en modo avión sin conexión.
  */
 
-import { fetchGoogleDriveEpubArrayBuffer } from './googleDriveEpub';
-
 const DB_NAME = 'bmc_epub_offline';
 const DB_VERSION = 1;
 const STORE_EPUB = 'epub_store';
-const RECORD_KEY = '101BMC_EPUB_FILE';
+const RECORD_KEY = '101BMC_EPUB_1rgqqz4IZSeVB12Y5KIYAB3P4mZeXpFgP';
 
 let dbInstance: IDBDatabase | null = null;
 
@@ -130,8 +128,12 @@ export async function deleteOfflineEpub(): Promise<void> {
 }
 
 /**
- * Descarga los bytes del EPUB exclusivamente desde Google Drive
+ * Descarga los bytes del EPUB desde la ruta local de la aplicación (/101BMC.epub)
  */
 export async function fetchEpubBinary(): Promise<ArrayBuffer> {
-  return await fetchGoogleDriveEpubArrayBuffer();
+  const resp = await fetch('/101BMC.epub');
+  if (!resp.ok) {
+    throw new Error('No se pudo cargar /101BMC.epub desde la carpeta public');
+  }
+  return await resp.arrayBuffer();
 }

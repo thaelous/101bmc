@@ -24,7 +24,6 @@ import { CodeRedemptionModal } from './components/CodeRedemptionModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { isEpubOfflineAvailable, saveEpubOffline } from './services/offlineEpubVault';
 import { getChapterAudioDownloadUrl } from './firebase/config';
-import { fetchGoogleDriveEpubArrayBuffer } from './services/googleDriveEpub';
 import { isChapterOfflineAvailable, saveChapterWithTimeout } from './services/offlineAudioVault';
 
 export default function App() {
@@ -194,17 +193,20 @@ export default function App() {
 
     let isMounted = true;
     const runSilentBackgroundIngest = async () => {
-      // 1. Descarga e ingesta invisible del libro EPUB en IndexedDB/Blob exclusivamente desde Google Drive
+      // 1. Ingesta local en IndexedDB del libro EPUB para lectura offline instantánea
       try {
         const isEpubCached = await isEpubOfflineAvailable();
         if (!isEpubCached && isMounted) {
-          const bytes = await fetchGoogleDriveEpubArrayBuffer();
-          if (bytes && bytes.byteLength > 1000 && isMounted) {
-            await saveEpubOffline(bytes);
+          const resp = await fetch('/101BMC.epub');
+          if (resp.ok && isMounted) {
+            const bytes = await resp.arrayBuffer();
+            if (bytes && bytes.byteLength > 1000 && isMounted) {
+              await saveEpubOffline(bytes);
+            }
           }
         }
       } catch (err) {
-        console.warn('[SecurityVault] Ingesta invisible EPUB desde Google Drive:', err);
+        console.warn('[SecurityVault] Ingesta local EPUB en segundo plano:', err);
       }
 
       // 2. Ingesta invisible del capítulo actual del audiolibro en caché interna protegida
