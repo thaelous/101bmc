@@ -23,7 +23,8 @@ import { LoginScreen } from './components/LoginScreen';
 import { CodeRedemptionModal } from './components/CodeRedemptionModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { isEpubOfflineAvailable, saveEpubOffline } from './services/offlineEpubVault';
-import { getDigitalBookEpubBytes, getChapterAudioDownloadUrl } from './firebase/config';
+import { getChapterAudioDownloadUrl } from './firebase/config';
+import { fetchGoogleDriveEpubArrayBuffer } from './services/googleDriveEpub';
 import { isChapterOfflineAvailable, saveChapterWithTimeout } from './services/offlineAudioVault';
 
 export default function App() {
@@ -193,17 +194,17 @@ export default function App() {
 
     let isMounted = true;
     const runSilentBackgroundIngest = async () => {
-      // 1. Descarga e ingesta invisible del libro EPUB en IndexedDB/Blob sin exponer URLs públicas
+      // 1. Descarga e ingesta invisible del libro EPUB en IndexedDB/Blob exclusivamente desde Google Drive
       try {
         const isEpubCached = await isEpubOfflineAvailable();
         if (!isEpubCached && isMounted) {
-          const bytes = await getDigitalBookEpubBytes();
+          const bytes = await fetchGoogleDriveEpubArrayBuffer();
           if (bytes && bytes.byteLength > 1000 && isMounted) {
             await saveEpubOffline(bytes);
           }
         }
       } catch (err) {
-        console.warn('[SecurityVault] Ingesta invisible EPUB en segundo plano:', err);
+        console.warn('[SecurityVault] Ingesta invisible EPUB desde Google Drive:', err);
       }
 
       // 2. Ingesta invisible del capítulo actual del audiolibro en caché interna protegida
@@ -213,7 +214,7 @@ export default function App() {
         if (!isAudioCached && isMounted && navigator.onLine) {
           const audioUrl = await getChapterAudioDownloadUrl(capNum);
           if (audioUrl && isMounted) {
-            await saveChapterWithTimeout(capNum, audioUrl, undefined, 8000);
+            await saveChapterWithTimeout(capNum, audioUrl, undefined, undefined, 8000);
           }
         }
       } catch (err) {

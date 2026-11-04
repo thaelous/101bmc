@@ -38,6 +38,7 @@ import {
 } from 'firebase/storage';
 import { CodigoDocument, UserProfile, AudioTrackItem } from '../types';
 import { getOfficialAudioTracks, OFFICIAL_113_CHAPTERS, titulosOficiales } from '../data/chaptersData';
+import { fetchGoogleDriveEpubArrayBuffer, GOOGLE_DRIVE_EPUB_DIRECT_URL } from '../services/googleDriveEpub';
 
 // ============================================================================
 // CONFIGURACIÓN OFICIAL DE FIREBASE (libros-1f750)
@@ -874,128 +875,23 @@ export async function getChapterAudioDownloadUrl(
   throw new Error(`No se pudo obtener URL segura mediante getDownloadURL para ${storagePath}`);
 }
 
-// Caché en memoria para la URL del archivo 101BMC.epub
-let cachedEpubDownloadUrl: string | null = null;
+// ============================================================================
+// LIBRO DIGITAL EPUB: DESCARGA EXCLUSIVA DESDE GOOGLE DRIVE
+// Se elimina por completo cualquier fetch hacia Firebase Storage para 101BMC.epub
+// ============================================================================
 
 /**
- * Carga el archivo EPUB del Libro Digital desde la raíz de Firebase Storage con el nombre exacto 101BMC.epub
- * mediante getDownloadURL(ref(storage, '101BMC.epub')).
+ * Retorna la URL oficial de descarga directa de Google Drive para 101BMC.epub
  */
 export async function getDigitalBookEpubUrl(): Promise<{ url: string | null; error?: string }> {
-  if (cachedEpubDownloadUrl) {
-    return { url: cachedEpubDownloadUrl };
-  }
-
-  try {
-    // 1. Archivo 101BMC.epub en la raíz de Storage
-    const downloadUrl = await resolveStorageDownloadUrlWithPromises('101BMC.epub');
-    if (downloadUrl) {
-      cachedEpubDownloadUrl = downloadUrl;
-      return { url: downloadUrl };
-    }
-  } catch (err: any) {
-    console.warn('[Firebase Storage] Error al resolver 101BMC.epub en la raíz:', err?.message || err);
-    
-    // 2. Probar en subcarpeta si aplica
-    try {
-      const subfolderUrl = await resolveStorageDownloadUrlWithPromises('libro/101BMC.epub');
-      if (subfolderUrl) {
-        cachedEpubDownloadUrl = subfolderUrl;
-        return { url: subfolderUrl };
-      }
-    } catch {
-      // Ignorar fallback secundario
-    }
-
-    return {
-      url: null,
-      error: 'No se pudo cargar el libro digital EPUB. Por favor, verifica tu conexión.'
-    };
-  }
-
-  return {
-    url: null,
-    error: 'No se pudo resolver el libro digital EPUB.'
-  };
+  return { url: GOOGLE_DRIVE_EPUB_DIRECT_URL };
 }
 
 /**
- * Obtiene los bytes binarios del archivo 101BMC.epub directamente de Firebase Storage
- * utilizando la SDK modular de Firebase (getBlob y getBytes con límite de 100MB).
+ * Obtiene los bytes binarios de 101BMC.epub exclusivamente desde Google Drive (ArrayBuffer)
  */
 export async function getDigitalBookEpubBytes(): Promise<ArrayBuffer> {
-  const storages = [
-    storage,
-    altStorageFirebasestorage,
-    altStorageAppspot
-  ].filter(Boolean);
-
-  let lastError: any = null;
-
-  // 1. Descarga directa con getBlob() de Firebase Storage SDK
-  for (const s of storages) {
-    try {
-      const storageRef = ref(s, '101BMC.epub');
-      const blob = await getBlob(storageRef);
-      if (blob && blob.size > 1000) {
-        return await blob.arrayBuffer();
-      }
-    } catch (err: any) {
-      lastError = err;
-    }
-  }
-
-  // 2. Descarga directa con getBytes() especificando límite de 100MB
-  for (const s of storages) {
-    try {
-      const storageRef = ref(s, '101BMC.epub');
-      const bytes = await getBytes(storageRef, 100 * 1024 * 1024);
-      if (bytes && bytes.byteLength > 1000) {
-        return bytes;
-      }
-    } catch (err: any) {
-      lastError = err;
-    }
-  }
-
-  // 3. Probar ruta alternativa en minúsculas '101bmc.epub'
-  for (const s of storages) {
-    try {
-      const storageRef = ref(s, '101bmc.epub');
-      const blob = await getBlob(storageRef);
-      if (blob && blob.size > 1000) {
-        return await blob.arrayBuffer();
-      }
-    } catch (err: any) {
-      lastError = err;
-    }
-  }
-
-  // 4. Intentar con getDownloadURL() y fetch directo
-  try {
-    const downloadUrl = await resolveStorageDownloadUrlWithPromises('101BMC.epub');
-    if (downloadUrl) {
-      const resp = await fetch(downloadUrl);
-      if (resp.ok) {
-        return await resp.arrayBuffer();
-      }
-    }
-  } catch (err: any) {
-    lastError = err;
-  }
-
-  // 5. Fallback a subcarpeta 'libro/101BMC.epub'
-  try {
-    const subRef = ref(storage, 'libro/101BMC.epub');
-    const blob = await getBlob(subRef);
-    if (blob && blob.size > 1000) {
-      return await blob.arrayBuffer();
-    }
-  } catch (err: any) {
-    lastError = err;
-  }
-
-  throw lastError || new Error('No se pudo obtener el archivo 101BMC.epub desde Firebase Storage.');
+  return await fetchGoogleDriveEpubArrayBuffer();
 }
 
 /**

@@ -17,13 +17,16 @@ import {
   ZoomOut,
   RotateCcw
 } from 'lucide-react';
-import { getDigitalBookEpubBytes } from '../firebase/config';
 import { 
   isEpubOfflineAvailable, 
   saveEpubOffline, 
   getOfflineEpubData, 
   deleteOfflineEpub 
 } from '../services/offlineEpubVault';
+import { 
+  fetchGoogleDriveEpubArrayBuffer, 
+  GOOGLE_DRIVE_EPUB_DIRECT_URL 
+} from '../services/googleDriveEpub';
 
 interface BookReaderProps {
   userEmail: string;
@@ -63,7 +66,7 @@ export const BookReader: React.FC<BookReaderProps> = ({
     isEpubOfflineAvailable().then(avail => setIsOfflineSaved(avail));
   }, []);
 
-  // Carga del archivo EPUB utilizando el método ePub(localUrl) mediante Blob en memoria RAM
+  // Carga del archivo EPUB utilizando exclusivamente el enlace directo de Google Drive -> ArrayBuffer -> Blob en memoria RAM
   const loadEpubBook = useCallback(async () => {
     setIsLoading(true);
     setError(null);
@@ -100,35 +103,31 @@ export const BookReader: React.FC<BookReaderProps> = ({
       const offlineAvailable = await isEpubOfflineAvailable();
       setIsOfflineSaved(offlineAvailable);
 
-      let bytes: ArrayBuffer | null = null;
+      let arrayBuffer: ArrayBuffer | null = null;
 
       if (offlineAvailable) {
         const offlineBuffer = await getOfflineEpubData();
         if (offlineBuffer && offlineBuffer.byteLength > 1000) {
-          bytes = offlineBuffer;
+          arrayBuffer = offlineBuffer;
         }
       }
 
-      // 2. Si no estaba guardado en IndexedDB, descargar datos binarios protegidos desde Firebase Storage
-      if (!bytes) {
-        bytes = await getDigitalBookEpubBytes();
-        // Almacenar automáticamente en IndexedDB para disponibilidad offline sin exposición de URLs
-        saveEpubOffline(bytes)
+      // 2. Si no estaba en IndexedDB, descargar exclusivamente desde Google Drive (cero Firebase Storage)
+      if (!arrayBuffer) {
+        arrayBuffer = await fetchGoogleDriveEpubArrayBuffer();
+        // Guardar en IndexedDB para disponibilidad sin conexión
+        saveEpubOffline(arrayBuffer)
           .then(() => setIsOfflineSaved(true))
           .catch(() => {});
       }
 
-      if (!bytes || bytes.byteLength < 1000) {
-        throw new Error('El archivo del libro digital no contiene datos válidos.');
-      }
+      // 3. Convertir el ArrayBuffer en un objeto Blob local en memoria y crear objectUrl
+      const blob = new Blob([arrayBuffer], { type: "application/epub+zip" });
+      const objectUrl = URL.createObjectURL(blob);
+      blobUrlRef.current = objectUrl;
 
-      // 3. Crear Blob efímero en memoria RAM y ObjectURL local (evita URLs expuestas y bloqueos CORS)
-      const blob = new Blob([bytes], { type: 'application/epub+zip' });
-      const localUrl = URL.createObjectURL(blob);
-      blobUrlRef.current = localUrl;
-
-      // 4. Inicializar ePub con la localUrl generada desde el Blob protegido
-      const book = initEpubBook(localUrl);
+      // 4. Inicializar ePub con la objectUrl local en memoria RAM
+      const book = initEpubBook(objectUrl);
       bookRef.current = book;
 
       // 5. Configurar rendition obligatoriamente con spread: "none" y flow: "paginated" (estrictamente una sola página individual)
@@ -296,11 +295,11 @@ export const BookReader: React.FC<BookReaderProps> = ({
   const handleSaveEpubOffline = async () => {
     try {
       setIsSavingOffline(true);
-      const arrayBuffer = await getDigitalBookEpubBytes();
+      const arrayBuffer = await fetchGoogleDriveEpubArrayBuffer();
       await saveEpubOffline(arrayBuffer);
       setIsOfflineSaved(true);
     } catch (err: any) {
-      console.warn('[BookReader] Error guardando EPUB offline:', err);
+      console.warn('[BookReader] Error guardando EPUB offline desde Google Drive:', err);
     } finally {
       setIsSavingOffline(false);
     }

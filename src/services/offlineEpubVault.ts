@@ -2,12 +2,11 @@
  * Módulo de Almacenamiento Seguro para el Libro Digital EPUB
  * Base de datos IndexedDB: "bmc_epub_offline"
  * 
- * Permite descargar y guardar el ArrayBuffer del libro 101BMC.epub en IndexedDB,
- * y cargarlo instantáneamente mediante ePub(arrayBuffer) incluso en modo avión sin conexión.
+ * Permite descargar desde Google Drive y guardar el ArrayBuffer del libro 101BMC.epub en IndexedDB,
+ * y cargarlo instantáneamente mediante ePub(objectUrl) desde un Blob local incluso en modo avión sin conexión.
  */
 
-import { ref, getBlob, getBytes } from 'firebase/storage';
-import { storage } from '../firebase/config';
+import { fetchGoogleDriveEpubArrayBuffer } from './googleDriveEpub';
 
 const DB_NAME = 'bmc_epub_offline';
 const DB_VERSION = 1;
@@ -130,11 +129,9 @@ export async function deleteOfflineEpub(): Promise<void> {
   }
 }
 
-import { getDigitalBookEpubBytes } from '../firebase/config';
-
 /**
- * Descarga los bytes del EPUB utilizando la SDK de Firebase Storage directamente.
+ * Descarga los bytes del EPUB exclusivamente desde Google Drive
  */
 export async function fetchEpubBinary(): Promise<ArrayBuffer> {
-  return await getDigitalBookEpubBytes();
+  return await fetchGoogleDriveEpubArrayBuffer();
 }
