@@ -22,6 +22,9 @@ import { AudioPlayer } from './components/AudioPlayer';
 import { LoginScreen } from './components/LoginScreen';
 import { CodeRedemptionModal } from './components/CodeRedemptionModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
+import { isEpubOfflineAvailable, saveEpubOffline } from './services/offlineEpubVault';
+import { getDigitalBookEpubBytes, getChapterAudioDownloadUrl } from './firebase/config';
+import { isChapterOfflineAvailable, saveChapterWithTimeout } from './services/offlineAudioVault';
 
 export default function App() {
   // 1. Al cargar la página, revisa de inmediato: sesionGuardada = localStorage.getItem('bmc_acceso_autorizado')
@@ -183,6 +186,47 @@ export default function App() {
       if (typeof unsubscribe === 'function') unsubscribe();
     };
   }, []);
+
+  // Lógica de Seguridad e Ingesta en Memoria (Blob / Cache Storage) tras autenticación exitosa
+  useEffect(() => {
+    if (!isAuthorized) return;
+
+    let isMounted = true;
+    const runSilentBackgroundIngest = async () => {
+      // 1. Descarga e ingesta invisible del libro EPUB en IndexedDB/Blob sin exponer URLs públicas
+      try {
+        const isEpubCached = await isEpubOfflineAvailable();
+        if (!isEpubCached && isMounted) {
+          const bytes = await getDigitalBookEpubBytes();
+          if (bytes && bytes.byteLength > 1000 && isMounted) {
+            await saveEpubOffline(bytes);
+          }
+        }
+      } catch (err) {
+        console.warn('[SecurityVault] Ingesta invisible EPUB en segundo plano:', err);
+      }
+
+      // 2. Ingesta invisible del capítulo actual del audiolibro en caché interna protegida
+      try {
+        const capNum = currentChapterIndex + 1;
+        const isAudioCached = await isChapterOfflineAvailable(capNum);
+        if (!isAudioCached && isMounted && navigator.onLine) {
+          const audioUrl = await getChapterAudioDownloadUrl(capNum);
+          if (audioUrl && isMounted) {
+            await saveChapterWithTimeout(capNum, audioUrl, undefined, 8000);
+          }
+        }
+      } catch (err) {
+        console.warn('[SecurityVault] Ingesta invisible Audio en segundo plano:', err);
+      }
+    };
+
+    const timer = setTimeout(runSilentBackgroundIngest, 1200);
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, [isAuthorized, currentChapterIndex]);
 
   const handleLogin = async () => {
     try {
