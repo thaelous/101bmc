@@ -126,3 +126,32 @@ input[type="range"]::-webkit-slider-thumb:hover {
   animation: pageFlipPrev 0.38s cubic-bezier(0.22, 1, 0.36, 1) forwards;
   transform-origin: right center;
 }
+
+/* Reglas estrictas para el contenedor EPUB: evita contenedores con altura 0 o pantallas en blanco */
+#viewer {
+  width: 100% !important;
+  height: 600px !important;
+  min-height: 600px !important;
+  display: block !important;
+  position: relative !important;
+  background-color: #FFFFFF !important;
+}
+
+#viewer .epub-container,
+#viewer > div {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 600px !important;
+  display: block !important;
+  position: relative !important;
+  background-color: #FFFFFF !important;
+}
+
+#viewer iframe {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 600px !important;
+  border: none !important;
+  background-color: #FFFFFF !important;
+  display: block !important;
+}

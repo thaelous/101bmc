@@ -47,9 +47,9 @@ export const BookReader: React.FC<BookReaderProps> = ({
   const [isOfflineSaved, setIsOfflineSaved] = useState(false);
   const [isSavingOffline, setIsSavingOffline] = useState(false);
 
-  // Estados de navegación, página actual y Zoom Dinámico Centrado
+  // Estados de navegación, página actual y Zoom Dinámico Centrado (por defecto 125% para máxima legibilidad)
   const [currentLocationLabel, setCurrentLocationLabel] = useState<string>('Página 1');
-  const [zoomLevel, setZoomLevel] = useState<number>(100); // 80% a 150%
+  const [zoomLevel, setZoomLevel] = useState<number>(125); // 90% a 160%
 
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerContainerRef = useRef<HTMLDivElement>(null);
@@ -88,20 +88,20 @@ export const BookReader: React.FC<BookReaderProps> = ({
         blobUrlRef.current = null;
       }
 
-      // Asegurar que el contenedor DOM #viewer esté limpio y listo
+      // Asegurar que el contenedor DOM #viewer esté limpio y listo con dimensiones garantizadas
       const containerEl = viewerContainerRef.current || document.getElementById('viewer');
       if (!containerEl) {
         throw new Error('El contenedor del visor (#viewer) no se encuentra en el DOM.');
       }
       containerEl.innerHTML = '';
 
-      // Carga directa del EPUB local desde la carpeta public con ruta relativa limpia
-      // Elimina cualquier error de CORS y permite apertura instantánea
+      // Carga directa del EPUB local desde la carpeta public con ruta relativa limpia: /101BMC.epub
       const book = initEpubBook("/101BMC.epub");
       bookRef.current = book;
 
-      // Configurar rendition obligatoriamente con spread: "none" y flow: "paginated" (estrictamente una sola página individual)
-      const rendition = book.renderTo("viewer", {
+      // Configurar rendition con dimensiones completas (width: "100%", height: "100%")
+      // Se pasa el elemento DOM containerEl directamente para evitar fallos de resolución
+      const rendition = book.renderTo(containerEl, {
         width: "100%",
         height: "100%",
         spread: "none",
@@ -109,31 +109,55 @@ export const BookReader: React.FC<BookReaderProps> = ({
       });
       renditionRef.current = rendition;
 
-      // Estilos tipográficos estrictos: Letras 100% en negro puro (#000000) sobre fondo blanco (#FFFFFF)
+      // 1. MODO DE UNA SOLA PÁGINA: Configurar explícitamente rendition.spread("none")
+      // eliminando estrictamente el formato de doble hoja o spread en cualquier resolución
+      try {
+        rendition.spread("none");
+      } catch (spreadErr) {
+        console.warn('[BookReader] spread("none") aviso:', spreadErr);
+      }
+
+      // 2. TAMAÑO DE FUENTE Y LEGIBILIDAD: Inyectar tipografía ampliada y limpia para evitar texto diminuto
       rendition.themes.default({
         'body': {
           'font-family': "'Plus Jakarta Sans', system-ui, -apple-system, sans-serif !important",
           'color': '#000000 !important',
           'background': '#FFFFFF !important',
           'padding': '24px 32px !important',
-          'line-height': '1.7 !important',
-          'margin': '0 auto !important'
+          'line-height': '1.8 !important',
+          'margin': '0 auto !important',
+          'font-size': '20px !important'
         },
         'p, span, div, li': {
           'color': '#000000 !important',
-          'font-size': '17px !important',
-          'line-height': '1.75 !important'
+          'font-size': '19px !important',
+          'line-height': '1.85 !important',
+          'letter-spacing': '0.01em !important'
         },
         'a': {
-          'color': '#000000 !important',
+          'color': '#1e5ad9 !important',
           'text-decoration': 'none !important'
         },
         'h1, h2, h3, h4, h5, h6': {
           'font-family': "'Outfit', sans-serif !important",
           'color': '#000000 !important',
-          'font-weight': '800 !important'
+          'font-weight': '800 !important',
+          'line-height': '1.3 !important'
+        },
+        'h1': {
+          'font-size': '28px !important',
+          'margin-bottom': '18px !important'
+        },
+        'h2': {
+          'font-size': '24px !important',
+          'margin-bottom': '14px !important'
         }
       });
+
+      // Aplicar tipografía cómoda inicial superior al 100% (125%)
+      try {
+        rendition.themes.fontSize('125%');
+      } catch {}
 
       // Escuchar eventos de renderizado para ocultar de inmediato el overlay de carga
       rendition.on('rendered', () => {
@@ -146,9 +170,23 @@ export const BookReader: React.FC<BookReaderProps> = ({
         setIsLoading(false);
       });
 
-      // Inicializar y mostrar la página actual o guardada
-      const savedLocation = localStorage.getItem('bmc_epub_last_location');
-      await rendition.display(savedLocation || undefined);
+      // LLAMADA EXPLÍCITA E INMEDIATA a rendition.display() una vez que el libro esté listo
+      try {
+        await book.ready;
+        const savedLocation = localStorage.getItem('bmc_epub_last_location');
+        if (savedLocation) {
+          try {
+            await rendition.display(savedLocation);
+          } catch {
+            await rendition.display();
+          }
+        } else {
+          await rendition.display();
+        }
+      } catch (readyErr) {
+        console.warn('[BookReader] Advertencia al esperar book.ready, forzando display():', readyErr);
+        await rendition.display();
+      }
 
       // Monitoreo de ubicación y avance
       rendition.on('relocated', (location: any) => {
@@ -253,10 +291,10 @@ export const BookReader: React.FC<BookReaderProps> = ({
   };
 
   const resetZoom = () => {
-    setZoomLevel(100);
+    setZoomLevel(125);
     if (renditionRef.current) {
       try {
-        renditionRef.current.themes.fontSize('100%');
+        renditionRef.current.themes.fontSize('125%');
       } catch {}
     }
   };
@@ -487,20 +525,25 @@ export const BookReader: React.FC<BookReaderProps> = ({
           </div>
         )}
 
-        {/* CONTENEDOR EXTERIOR #viewer CON DISPLAY FLEX, CENTRADO Y FONDO BLANCO PURO (#FFFFFF) */}
-        <div className="w-full flex-1 flex items-center justify-center bg-[#FFFFFF] p-2 sm:p-4 overflow-hidden">
+        {/* CONTENEDOR EXTERIOR DEL VISOR EPUB: FONDO BLANCO PURO Y DIMENSIONES FIJAS GARANTIZADAS (WIDTH 100%, HEIGHT 600PX) */}
+        <div 
+          className="w-full flex-1 relative bg-[#FFFFFF] p-2 sm:p-4 overflow-hidden flex flex-col items-center justify-start"
+          style={{ 
+            width: '100%',
+            height: isFullscreen ? 'calc(100vh - 160px)' : '620px',
+            minHeight: '600px'
+          }}
+        >
           <div 
             id="viewer" 
             ref={viewerContainerRef} 
-            className="w-full h-full min-h-[500px] sm:min-h-[600px] max-w-3xl flex items-center justify-center bg-[#FFFFFF] shadow-sm rounded-lg"
+            className="w-full max-w-3xl relative bg-[#FFFFFF] shadow-sm rounded-lg overflow-hidden"
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: '#FFFFFF',
-              transform: `scale(${zoomLevel / 100})`,
-              transformOrigin: 'center center',
-              transition: 'transform 0.15s ease-out'
+              display: 'block',
+              width: '100%',
+              height: isFullscreen ? 'calc(100vh - 180px)' : '600px',
+              minHeight: '600px',
+              backgroundColor: '#FFFFFF'
             }}
           />
         </div>
