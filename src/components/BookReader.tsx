@@ -56,6 +56,9 @@ export const BookReader: React.FC<BookReaderProps> = ({
   const touchStartYRef = useRef<number | null>(null);
   const pinchStartDistRef = useRef<number | null>(null);
   const initialZoomRef = useRef<number>(1.0);
+  const renderSequenceRef = useRef<number>(0);
+  const sliderTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isTouchMovedRef = useRef<boolean>(false);
 
   // Estado de la página actual guardada en localStorage
   const [currentPage, setCurrentPage] = useState<number>(() => {
@@ -76,6 +79,7 @@ export const BookReader: React.FC<BookReaderProps> = ({
     return 1;
   });
 
+  const [sliderValue, setSliderValue] = useState<number>(() => currentPage);
   const [pageInputValue, setPageInputValue] = useState<string>(() => currentPage.toString());
 
   const [downloadProgress, setDownloadProgress] = useState<number>(0);
@@ -164,23 +168,38 @@ export const BookReader: React.FC<BookReaderProps> = ({
     };
   }, []);
 
-  // Función para renderizar la página en el canvas
+  // Función para renderizar la página en el canvas de forma secuencial y segura
   const renderCurrentPage = useCallback(async () => {
     const pdf = pdfDocRef.current;
     const canvas = canvasRef.current;
     const container = containerRef.current;
     if (!pdf || !canvas || !container) return;
 
+    // Incrementar secuencia única de renderizado
+    const renderId = ++renderSequenceRef.current;
+
+    // 1. Si hay una tarea en curso en el canvas, cancelarla y esperar a que PDF.js la libere
+    if (currentRenderTaskRef.current) {
+      try {
+        currentRenderTaskRef.current.cancel();
+        await currentRenderTaskRef.current.promise;
+      } catch {
+        // RenderingCancelledException es normal y esperado al cancelar
+      }
+      currentRenderTaskRef.current = null;
+    }
+
+    // Si durante la espera llegó otra petición más reciente, salir
+    if (renderId !== renderSequenceRef.current) {
+      return;
+    }
+
     try {
       setIsRenderingPage(true);
 
-      // Cancelar cualquier renderizado anterior en curso
-      if (currentRenderTaskRef.current) {
-        currentRenderTaskRef.current.cancel();
-        currentRenderTaskRef.current = null;
-      }
-
       const page = await pdf.getPage(currentPage);
+      if (renderId !== renderSequenceRef.current) return;
+
       const baseViewport = page.getViewport({ scale: 1.0 });
 
       // Obtener ancho y alto disponibles en el contenedor (maximizando área de lectura)
@@ -191,7 +210,6 @@ export const BookReader: React.FC<BookReaderProps> = ({
       const containerHeight = Math.max(container.clientHeight - padY, 200);
 
       // Escalar para que encaje al 100% en la pantalla ("Fit to screen / Fit to page")
-      // Esto asegura que toda la página del libro se vea completa en la pantalla del celular sin recortes
       const scaleFitWidth = containerWidth / baseViewport.width;
       const scaleFitHeight = containerHeight / baseViewport.height;
 
@@ -215,17 +233,25 @@ export const BookReader: React.FC<BookReaderProps> = ({
         viewport: viewport
       };
 
+      if (renderId !== renderSequenceRef.current) return;
+
       const renderTask = page.render(renderContext);
       currentRenderTaskRef.current = renderTask;
 
       await renderTask.promise;
-      setIsRenderingPage(false);
-      currentRenderTaskRef.current = null;
+
+      if (renderId === renderSequenceRef.current) {
+        currentRenderTaskRef.current = null;
+        setIsRenderingPage(false);
+      }
     } catch (err: any) {
       if (err?.name !== 'RenderingCancelledException') {
-        console.error('Error renderizando página:', err);
+        console.warn('Renderizado de página:', err);
       }
-      setIsRenderingPage(false);
+      if (renderId === renderSequenceRef.current) {
+        currentRenderTaskRef.current = null;
+        setIsRenderingPage(false);
+      }
     }
   }, [currentPage, zoomFactor]);
 
@@ -287,11 +313,34 @@ export const BookReader: React.FC<BookReaderProps> = ({
   const goToPage = (target: number) => {
     const valid = Math.max(1, Math.min(totalPages, target));
     setCurrentPage(valid);
+    setSliderValue(valid);
     setPageInputValue(valid.toString());
     try {
       localStorage.setItem('bmc_pagina_libro_actual', valid.toString());
     } catch {}
   };
+
+  // Manejo fluido del slider con debounce para evitar colisiones en PDF.js
+  const handleSliderChange = (target: number) => {
+    const valid = Math.max(1, Math.min(totalPages, target));
+    setSliderValue(valid);
+    setPageInputValue(valid.toString());
+    if (sliderTimerRef.current) {
+      clearTimeout(sliderTimerRef.current);
+    }
+    sliderTimerRef.current = setTimeout(() => {
+      goToPage(valid);
+    }, 60);
+  };
+
+  // Limpiar temporizador al desmontar
+  useEffect(() => {
+    return () => {
+      if (sliderTimerRef.current) {
+        clearTimeout(sliderTimerRef.current);
+      }
+    };
+  }, []);
 
   const handlePrevPage = () => {
     if (currentPage > 1) {
@@ -398,11 +447,13 @@ export const BookReader: React.FC<BookReaderProps> = ({
 
   // Gestos táctiles nativos y de pellizco (zoom con 2 dedos) y swipe de página (1 dedo)
   const handleTouchStart = (e: React.TouchEvent) => {
+    isTouchMovedRef.current = false;
     if (e.touches.length === 1) {
       touchStartXRef.current = e.touches[0].clientX;
       touchStartYRef.current = e.touches[0].clientY;
       pinchStartDistRef.current = null;
     } else if (e.touches.length === 2) {
+      isTouchMovedRef.current = true;
       touchStartXRef.current = null;
       touchStartYRef.current = null;
       const dist = Math.hypot(
@@ -415,7 +466,14 @@ export const BookReader: React.FC<BookReaderProps> = ({
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (e.touches.length === 2 && pinchStartDistRef.current !== null && pinchStartDistRef.current > 0) {
+    if (e.touches.length === 1 && touchStartXRef.current !== null && touchStartYRef.current !== null) {
+      const moveX = Math.abs(e.touches[0].clientX - touchStartXRef.current);
+      const moveY = Math.abs(e.touches[0].clientY - touchStartYRef.current);
+      if (moveX > 12 || moveY > 12) {
+        isTouchMovedRef.current = true;
+      }
+    } else if (e.touches.length === 2 && pinchStartDistRef.current !== null && pinchStartDistRef.current > 0) {
+      isTouchMovedRef.current = true;
       const currentDist = Math.hypot(
         e.touches[0].clientX - e.touches[1].clientX,
         e.touches[0].clientY - e.touches[1].clientY
@@ -431,8 +489,8 @@ export const BookReader: React.FC<BookReaderProps> = ({
       pinchStartDistRef.current = null;
       return;
     }
-    // Si la página tiene aumento (> 1.2x), permitir navegación y paneo libre sin pasar página por error
-    if (touchStartXRef.current === null || zoomFactor > 1.2) return;
+    // Si la página tiene aumento (> 1.25x), permitir navegación y paneo libre sin pasar página por error
+    if (touchStartXRef.current === null || zoomFactor > 1.25) return;
     const touchEndX = e.changedTouches[0].clientX;
     const touchEndY = e.changedTouches[0].clientY;
     const diffX = touchEndX - touchStartXRef.current;
@@ -442,6 +500,7 @@ export const BookReader: React.FC<BookReaderProps> = ({
 
     // Umbral de 45px y dirección predominantemente horizontal
     if (Math.abs(diffX) > 45 && Math.abs(diffX) > Math.abs(diffY) * 1.3) {
+      isTouchMovedRef.current = true;
       if (diffX > 0) {
         handlePrevPage(); // Deslizar hacia la derecha -> página anterior
       } else {
@@ -516,16 +575,64 @@ export const BookReader: React.FC<BookReaderProps> = ({
           </div>
         )}
 
-        {/* CANVAS DE ALTA RESOLUCIÓN */}
-        <div className="relative flex items-center justify-center overflow-visible">
+        {/* CANVAS DE ALTA RESOLUCIÓN CON ZONAS TÁCTILES LATERALES */}
+        <div className="relative flex items-center justify-center overflow-visible select-none">
           <canvas 
             ref={canvasRef} 
             className={`rounded-lg sm:rounded-xl shadow-2xl transition-opacity duration-150 bg-white ${
               isLoadingDoc || isRenderingPage ? 'opacity-85' : 'opacity-100'
             }`}
           />
+
+          {/* ZONAS TÁCTILES LATERALES PARA CAMBIO DE PÁGINA (ESTILO LECTOR DIGITAL / KINDLE) */}
+          {!isLoadingDoc && (
+            <>
+              {/* Mitad Izquierda: Página Anterior */}
+              <div
+                role="button"
+                aria-label="Página anterior"
+                tabIndex={0}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (isTouchMovedRef.current || zoomFactor > 1.25) return;
+                  handlePrevPage();
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handlePrevPage();
+                  }
+                }}
+                className="absolute left-0 top-0 bottom-0 w-1/2 cursor-pointer z-10 select-none active:bg-black/5 rounded-l-lg sm:rounded-l-xl transition-colors focus:outline-none"
+                style={{ touchAction: 'pan-x pan-y pinch-zoom' }}
+                title="Toca el lado izquierdo para ir a la página anterior"
+              />
+
+              {/* Mitad Derecha: Página Siguiente */}
+              <div
+                role="button"
+                aria-label="Página siguiente"
+                tabIndex={0}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (isTouchMovedRef.current || zoomFactor > 1.25) return;
+                  handleNextPage();
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleNextPage();
+                  }
+                }}
+                className="absolute right-0 top-0 bottom-0 w-1/2 cursor-pointer z-10 select-none active:bg-black/5 rounded-r-lg sm:rounded-r-xl transition-colors focus:outline-none"
+                style={{ touchAction: 'pan-x pan-y pinch-zoom' }}
+                title="Toca el lado derecho para ir a la página siguiente"
+              />
+            </>
+          )}
+
           {isRenderingPage && (
-            <div className="absolute top-3 right-3 bg-neutral-900/80 backdrop-blur-xs text-amber-400 px-2 py-1 rounded-full text-[10px] font-bold flex items-center gap-1 shadow-md">
+            <div className="absolute top-3 right-3 bg-neutral-900/80 backdrop-blur-xs text-amber-400 px-2 py-1 rounded-full text-[10px] font-bold flex items-center gap-1 shadow-md z-20 pointer-events-none">
               <Loader2 className="w-3 h-3 animate-spin" />
               <span>Cambiando página...</span>
             </div>
@@ -543,16 +650,16 @@ export const BookReader: React.FC<BookReaderProps> = ({
           {/* Barra deslizante (slider) horizontal conectada a las páginas del PDF */}
           <div className="flex-1 flex items-center gap-2 sm:gap-3">
             <span className="text-[11px] font-bold text-neutral-600 font-mono select-none min-w-[20px] text-right">
-              {currentPage}
+              {sliderValue}
             </span>
             <input
               type="range"
               min={1}
               max={totalPages}
-              value={currentPage}
+              value={sliderValue}
               onChange={(e) => {
                 const val = parseInt(e.target.value, 10);
-                if (!isNaN(val)) goToPage(val);
+                if (!isNaN(val)) handleSliderChange(val);
               }}
               className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#7c3aed] transition"
               title="Desliza para hojear las páginas del libro"
