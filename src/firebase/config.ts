@@ -24,6 +24,7 @@ import {
   where, 
   getDocs, 
   getDoc,
+  setDoc,
   updateDoc, 
   doc, 
   serverTimestamp
@@ -924,5 +925,66 @@ export async function getChapterAudioBytes(
     }
     return await resp.arrayBuffer();
   }
+}
+
+// ============================================================================
+// PREFERENCIAS Y MARCADOR DE PÁGINA (LIBRO DIGITAL)
+// ============================================================================
+
+/**
+ * Guarda la página marcada del libro en Firestore y localStorage.
+ */
+export async function saveBookmarkedPage(userEmail: string, pageNumber: number): Promise<void> {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('bmc_pagina_marcada_libro', pageNumber.toString());
+    localStorage.setItem('bmc_pagina_libro_actual', pageNumber.toString());
+  }
+
+  if (!db || !userEmail) return;
+  const sanitizedEmail = userEmail.toLowerCase().trim();
+
+  try {
+    const userDocRef = doc(db, 'usuarios_progreso', sanitizedEmail);
+    await setDoc(userDocRef, {
+      pagina_marcada: pageNumber,
+      ultima_lectura: new Date().toISOString(),
+      updated_at: serverTimestamp()
+    }, { merge: true });
+  } catch (err) {
+    console.warn('[Firestore] Aviso guardando marcador de página:', err);
+  }
+}
+
+/**
+ * Consulta la última página marcada en Firestore o localStorage.
+ */
+export async function getBookmarkedPage(userEmail: string): Promise<number | null> {
+  // Respaldo inmediato en localStorage
+  if (typeof window !== 'undefined') {
+    const local = localStorage.getItem('bmc_pagina_marcada_libro');
+    if (local) {
+      const p = parseInt(local, 10);
+      if (!isNaN(p) && p >= 1) return p;
+    }
+  }
+
+  if (!db || !userEmail) return null;
+  const sanitizedEmail = userEmail.toLowerCase().trim();
+
+  try {
+    const userDocRef = doc(db, 'usuarios_progreso', sanitizedEmail);
+    const snap = await getDoc(userDocRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      if (data.pagina_marcada && typeof data.pagina_marcada === 'number') {
+        localStorage.setItem('bmc_pagina_marcada_libro', data.pagina_marcada.toString());
+        return data.pagina_marcada;
+      }
+    }
+  } catch (err) {
+    console.warn('[Firestore] Aviso consultando marcador:', err);
+  }
+
+  return null;
 }
 

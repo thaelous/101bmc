@@ -1,5 +1,5 @@
 // Service Worker for 101 Buenos Malos Consejos PWA
-const CACHE_NAME = 'consejos-pwa-v2';
+const CACHE_NAME = 'consejos-pwa-v4';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -42,9 +42,20 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Network-first for Firestore and API, Cache-first for static fonts, assets, local EPUB and PDF
+  // EXCLUSIÓN CRÍTICA: No interceptar archivos PDF, Range requests ni archivos de gran tamaño
+  // Esto permite que el navegador y PDF.js manejen peticiones Range 206 directamente sin error 500
+  if (
+    event.request.url.includes('.pdf') ||
+    event.request.url.includes('101BMC') ||
+    event.request.url.includes('libro-movil') ||
+    event.request.headers.get('range')
+  ) {
+    return;
+  }
+
+  // Network-first for Firestore and API, Cache-first for static fonts and lightweight images
   const isStatic = event.request.url.includes('/fonts.') ||
-                   event.request.url.match(/\.(png|svg|ico|jpg|jpeg|woff2?|epub|pdf)$/);
+                   event.request.url.match(/\.(png|svg|ico|jpg|jpeg|woff2?)$/);
 
   if (isStatic) {
     event.respondWith(
