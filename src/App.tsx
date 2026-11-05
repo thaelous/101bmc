@@ -371,7 +371,7 @@ export default function App() {
       {/* Contenido Principal Desbloqueado: Dos Secciones Independientes */}
       <main className="flex-1 flex flex-col">
         {activeTab === 'audio' && (
-          <div className="flex-1 flex flex-col justify-center py-3 sm:py-6">
+          <div className="flex-1 flex flex-col justify-center py-1.5 sm:py-3">
             <AudioPlayer
               chapters={BOOK_CHAPTERS}
               currentChapterIndex={currentChapterIndex}
@@ -383,7 +383,7 @@ export default function App() {
         )}
 
         {activeTab === 'book' && (
-          <div className="flex-1 flex flex-col py-3 sm:py-6">
+          <div className="flex-1 flex flex-col py-1 sm:py-3">
             <BookReader
               userEmail={currentUser?.email || localStorage.getItem('bmc_acceso_autorizado') || ''}
               isSideBySide={false}

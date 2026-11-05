@@ -596,321 +596,282 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
 
   return (
     <div 
-      className={`${isSideBySide ? 'w-full px-0 py-0' : 'max-w-4xl mx-auto px-4 py-6 sm:py-10'} select-none`}
+      className="w-full max-w-xl mx-auto px-2 sm:px-4 flex flex-col justify-center items-center select-none"
       onContextMenu={(e) => e.preventDefault()}
     >
-      {/* Tarjeta Central Estilo Celular Moderno */}
-      <div className={`mx-auto ${isSideBySide ? 'max-w-md w-full' : 'max-w-sm sm:max-w-md'} rounded-[44px] bg-[#0f2147] p-4 sm:p-5 shadow-[0_25px_60px_-15px_rgba(15,33,71,0.5)] border-4 border-white/60 relative overflow-hidden`}>
+      {/* Tarjeta Responsiva Moderna y Elegante (Sin marco de teléfono) */}
+      <div className="w-full glass-card rounded-3xl p-3.5 sm:p-5 text-center shadow-xl border border-white/80 bg-white/95 backdrop-blur-md relative flex flex-col justify-between">
         
-        {/* Notch / Dynamic Island del Celular */}
-        <div className="mx-auto w-28 h-4 rounded-full bg-black/60 mb-3 flex items-center justify-center">
-          <div className="w-2.5 h-2.5 rounded-full bg-slate-900 mr-2 border border-slate-700" />
-          <div className="w-1.5 h-1.5 rounded-full bg-blue-900/60" />
-        </div>
-
-        {/* Pantalla del Celular */}
-        <div className="rounded-[32px] bg-white p-5 sm:p-7 text-center shadow-inner relative overflow-hidden">
-          
-          {/* Badge superior del audiolibro con contador */}
-          <div className="flex items-center justify-between gap-2 mb-3">
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#7c3aed]/10 text-[#7c3aed] text-[11px] font-extrabold uppercase tracking-wider">
-              <Headphones className="w-3.5 h-3.5" />
-              <span>Audiolibro Oficial &bull; 113 Capítulos</span>
-            </div>
-
-            <div className="flex items-center gap-1.5">
-              {!isOnline && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-bold" title="Sin conexión a internet. Reproduciendo desde memoria local.">
-                  <WifiOff className="w-3 h-3 text-amber-600" />
-                  <span>Offline</span>
-                </span>
-              )}
-
-              <button
-                onClick={() => setShowChapterDrawer(true)}
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-100 hover:bg-[#7c3aed]/10 text-slate-700 hover:text-[#7c3aed] text-[11px] font-bold transition"
-                title="Abrir lista de reproducción completa"
-              >
-                <ListMusic className="w-3.5 h-3.5" />
-                <span>Capítulos</span>
-              </button>
-            </div>
+        {/* Cabecera compacta: Badge oficial, indicador offline y botón de lista de capítulos */}
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#7c3aed]/10 text-[#7c3aed] text-[10px] sm:text-[11px] font-extrabold uppercase tracking-wider">
+            <Headphones className="w-3.5 h-3.5" />
+            <span>113 Capítulos</span>
           </div>
 
-          {/* Arte Central Redondo con logo.png y efecto de disco giratorio */}
-          <div className="relative mx-auto my-3 w-48 h-48 sm:w-56 sm:h-56 flex items-center justify-center">
-            
-            {/* Anillo de audio animado cuando reproduce */}
-            <div className={`absolute inset-0 rounded-full border-4 border-dashed border-[#7c3aed]/30 ${isPlaying ? 'animate-[spin_16s_linear_infinite]' : ''}`} />
-            
-            {/* Imagen del personaje / carátula */}
-            <div className={`relative w-40 h-40 sm:w-48 sm:h-48 rounded-full p-1.5 bg-gradient-to-tr from-[#7c3aed] to-[#4f96fe] shadow-xl transition-transform duration-500 ${isPlaying ? 'scale-105' : ''}`}>
-              <img
-                src="/logo.png"
-                alt="101 Buenos Malos Consejos Para Mi Hijo"
-                className="w-full h-full rounded-full object-cover border-2 border-white shadow-md"
-              />
-
-              {/* Indicador de carga de audio */}
-              {isLoadingAudioUrl && (
-                <div className="absolute inset-0 rounded-full bg-black/40 flex items-center justify-center backdrop-blur-xs">
-                  <Loader2 className="w-8 h-8 text-white animate-spin" />
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Título Oficial Limpio */}
-          <div className="mt-4">
-            <h2 className="font-heading text-lg sm:text-xl font-black text-[#0f2147] tracking-tight leading-snug">
-              {currentTrack.title}
-            </h2>
-            <p className="text-xs text-slate-500 font-medium mt-1">
-              Robert Pacheco
-            </p>
-
-            {/* Aviso en caso de error de audio con botón de reintento */}
-            {audioError && (
-              <div className="mt-2.5 p-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-[11px] flex items-center justify-between gap-2 text-left">
-                <div className="flex items-center gap-1.5 overflow-hidden">
-                  <AlertCircle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
-                  <span className="truncate">{audioError}</span>
-                </div>
-                <button
-                  onClick={playAudio}
-                  className="px-2 py-0.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[10px] flex items-center gap-1 flex-shrink-0"
-                >
-                  <RefreshCw className="w-2.5 h-2.5" />
-                  <span>Reintentar</span>
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Barra de Progreso y Tiempo */}
-          <div className="mt-4 px-1">
-            <div className="relative group">
-              <input
-                type="range"
-                min="0"
-                max={duration || 160}
-                value={currentTime}
-                onChange={handleSeek}
-                className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#7c3aed] hover:accent-[#6d28d9] transition"
-              />
-            </div>
-            <div className="flex justify-between items-center text-[11px] font-mono text-slate-500 mt-1.5 font-bold">
-              <span>{formatTime(currentTime)}</span>
-              <span>{formatTime(duration || 160)}</span>
-            </div>
-          </div>
-
-          {/* Botones de Control Principal */}
-          <div className="mt-4 flex items-center justify-center gap-4 sm:gap-6">
-            <button
-              onClick={handlePrevTrack}
-              disabled={activeTrackIndex === 0}
-              className="p-2 text-slate-400 hover:text-[#0f2147] transition disabled:opacity-30"
-              title="Capítulo anterior"
-            >
-              <SkipBack className="w-5 h-5" />
-            </button>
-
-            <button
-              onClick={() => handleSkip(-15)}
-              className="p-2 text-slate-500 hover:text-[#7c3aed] transition"
-              title="Retroceder 15s"
-            >
-              <RotateCcw className="w-5 h-5" />
-            </button>
-
-            {/* Gran Botón Púrpura Play / Pausa */}
-            <button
-              onClick={togglePlay}
-              className="w-16 h-16 rounded-full bg-[#7c3aed] hover:bg-[#6d28d9] text-white flex items-center justify-center shadow-xl shadow-[#7c3aed]/40 hover:scale-105 active:scale-95 transition-all duration-200"
-            >
-              {isLoadingAudioUrl ? (
-                <Loader2 className="w-7 h-7 animate-spin" />
-              ) : isPlaying ? (
-                <Pause className="w-7 h-7 fill-current" />
-              ) : (
-                <Play className="w-7 h-7 fill-current ml-1" />
-              )}
-            </button>
-
-            <button
-              onClick={() => handleSkip(15)}
-              className="p-2 text-slate-500 hover:text-[#7c3aed] transition"
-              title="Adelantar 15s"
-            >
-              <RotateCw className="w-5 h-5" />
-            </button>
-
-            <button
-              onClick={handleNextTrack}
-              disabled={activeTrackIndex === tracks.length - 1}
-              className="p-2 text-slate-400 hover:text-[#0f2147] transition disabled:opacity-30"
-              title="Siguiente capítulo"
-            >
-              <SkipForward className="w-5 h-5" />
-            </button>
-          </div>
-
-          {/* Fila Inferior: Velocidad, Temporizador y Volumen */}
-          <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between text-xs">
-            {/* Velocidad */}
-            <div className="flex items-center rounded-xl bg-slate-100 p-0.5 font-bold">
-              {[0.75, 1.0, 1.25, 1.5].map((rate) => (
-                <button
-                  key={rate}
-                  onClick={() => handleSpeedChange(rate)}
-                  className={`px-1.5 py-0.5 rounded-lg text-[10px] transition ${
-                    playbackRate === rate
-                      ? 'bg-white text-[#7c3aed] shadow-sm'
-                      : 'text-slate-500 hover:text-[#0f2147]'
-                  }`}
-                >
-                  {rate}x
-                </button>
-              ))}
-            </div>
-
-            {/* Temporizador */}
-            <button
-              onClick={() => {
-                const options = [null, 5, 15, 30, -1];
-                const currentIndex = options.indexOf(sleepTimerMinutes);
-                const nextOption = options[(currentIndex + 1) % options.length];
-                setSleepTimerMinutes(nextOption);
-              }}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-bold transition ${
-                sleepTimerMinutes !== null
-                  ? 'bg-[#7c3aed] text-white shadow-sm'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              <Clock className="w-3 h-3" />
-              <span>
-                {sleepTimerRemaining !== null
-                  ? `${Math.ceil(sleepTimerRemaining / 60)}m`
-                  : sleepTimerMinutes === -1
-                  ? 'Fin'
-                  : 'Timer'}
+          <div className="flex items-center gap-1.5">
+            {!isOnline && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-bold" title="Sin conexión a internet. Reproduciendo desde memoria local.">
+                <WifiOff className="w-3 h-3 text-amber-600" />
+                <span>Offline</span>
               </span>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setShowChapterDrawer(true)}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-[#7c3aed]/10 text-slate-700 hover:text-[#7c3aed] text-[11px] font-bold transition cursor-pointer active:scale-95"
+              title="Abrir índice completo de capítulos"
+            >
+              <ListMusic className="w-3.5 h-3.5" />
+              <span>Índice ({tracks.length})</span>
             </button>
-
-            {/* Control de Volumen */}
-            <div className="flex items-center gap-1 text-slate-500">
-              <button onClick={toggleMute} className="hover:text-[#0f2147] transition">
-                {isMuted || volume === 0 ? (
-                  <VolumeX className="w-4 h-4 text-red-500" />
-                ) : (
-                  <Volume2 className="w-4 h-4" />
-                )}
-              </button>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.05"
-                value={isMuted ? 0 : volume}
-                onChange={handleVolumeChange}
-                className="w-14 sm:w-16 h-1 bg-slate-200 rounded-lg accent-[#7c3aed] cursor-pointer"
-                title="Volumen"
-              />
-            </div>
           </div>
+        </div>
 
-          {/* Botón Masivo Oficial: ⬇️ Descargar todos los capítulos (Modo sin conexión) */}
-          <div className="mt-4 pt-3.5 border-t border-slate-100 flex flex-col items-center justify-center gap-2">
-            {isBulkDownloading && bulkProgress ? (
-              <div className="w-full max-w-md p-3.5 rounded-2xl bg-[#7c3aed]/10 border border-[#7c3aed]/25 flex flex-col gap-2">
-                <div className="flex items-center justify-between text-xs font-bold text-[#7c3aed]">
-                  <span className="flex items-center gap-1.5">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>Guardando {bulkProgress.current} de {bulkProgress.total}...</span>
-                  </span>
-                  <span>{bulkProgress.percent}%</span>
-                </div>
-                
-                {/* Barra de progreso visual */}
-                <div className="w-full bg-slate-200/80 rounded-full h-2 overflow-hidden">
-                  <div 
-                    className="bg-gradient-to-r from-[#7c3aed] to-[#4f96fe] h-full transition-all duration-300 rounded-full"
-                    style={{ width: `${bulkProgress.percent}%` }}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between text-[11px] text-slate-500">
-                  <span className="truncate max-w-[220px] font-medium">{bulkProgress.chapterTitle}</span>
-                  <button
-                    type="button"
-                    onClick={handleCancelBulkDownload}
-                    className="text-red-600 hover:text-red-700 font-bold px-2 py-0.5 rounded hover:bg-red-50 transition cursor-pointer"
-                  >
-                    Cancelar
-                  </button>
-                </div>
-              </div>
-            ) : offlineChapterNumbers.size >= 113 ? (
-              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-bold shadow-2xs">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                <span>✅ Todos los capítulos guardados (Modo sin conexión listo)</span>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center gap-2 w-full">
-                <div className="flex flex-wrap items-center justify-center gap-2 w-full">
-                  <button
-                    type="button"
-                    onClick={handleStartBulkDownload}
-                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#7c3aed] to-[#4f96fe] hover:from-[#6d28d9] hover:to-[#3b82f6] text-white text-xs font-black uppercase tracking-wider shadow-md shadow-[#7c3aed]/20 transition active:scale-95 cursor-pointer"
-                    title="Descarga secuencialmente los 113 capítulos en IndexedDB para escuchar sin conexión"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span>⬇️ Descargar todos los capítulos (Modo sin conexión)</span>
-                  </button>
-
-                  {/* Guardar solo el capítulo actual */}
-                  {!offlineChapterNumbers.has(currentTrack.chapterNumber) && (
-                    <button
-                      type="button"
-                      onClick={() => handleDownloadOffline(currentTrack.chapterNumber, currentTrack.title, currentTrack.filename)}
-                      disabled={downloadingChapterId === currentTrack.chapterNumber}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition cursor-pointer active:scale-95"
-                      title="Guardar este capítulo individual"
-                    >
-                      {downloadingChapterId === currentTrack.chapterNumber ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin text-[#7c3aed]" />
-                      ) : (
-                        <Download className="w-3.5 h-3.5 text-[#7c3aed]" />
-                      )}
-                      <span>Guardar capítulo actual</span>
-                    </button>
-                  )}
-                </div>
-
-                {offlineChapterNumbers.size > 0 && (
-                  <span className="text-[11px] font-bold text-slate-500">
-                    {offlineChapterNumbers.size} de 113 capítulos guardados en el dispositivo
-                  </span>
-                )}
+        {/* Arte Central Redondo con logo y efecto de disco giratorio */}
+        <div className="relative mx-auto my-1 sm:my-2 w-28 h-28 sm:w-36 sm:h-36 md:w-40 md:h-40 flex items-center justify-center">
+          {/* Anillo animado al reproducir */}
+          <div className={`absolute inset-0 rounded-full border-4 border-dashed border-[#7c3aed]/30 ${isPlaying ? 'animate-[spin_16s_linear_infinite]' : ''}`} />
+          
+          {/* Carátula oficial */}
+          <div className={`relative w-24 h-24 sm:w-32 sm:h-32 md:w-36 md:h-36 rounded-full p-1 bg-gradient-to-tr from-[#7c3aed] to-[#4f96fe] shadow-lg transition-transform duration-500 ${isPlaying ? 'scale-105' : ''}`}>
+            <img
+              src="/logo.png"
+              alt="101 Buenos Malos Consejos"
+              className="w-full h-full rounded-full object-cover border-2 border-white shadow-sm"
+            />
+            {isLoadingAudioUrl && (
+              <div className="absolute inset-0 rounded-full bg-black/40 flex items-center justify-center backdrop-blur-xs">
+                <Loader2 className="w-6 h-6 text-white animate-spin" />
               </div>
             )}
           </div>
-
         </div>
-      </div>
 
-      {/* Botón flotante para abrir la Lista de Capítulos completa */}
-      <div className="mt-6 flex justify-center">
-        <button
-          onClick={() => setShowChapterDrawer(true)}
-          className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-white/95 hover:bg-white text-[#0f2147] border border-white/80 shadow-lg text-xs font-black uppercase tracking-wider backdrop-blur-md transition-all active:scale-[0.98]"
-        >
-          <ListMusic className="w-4 h-4 text-[#7c3aed]" />
-          <span>Ver Índice Oficial de Capítulos ({tracks.length} Pistas)</span>
-          <ArrowRight className="w-3.5 h-3.5 text-[#7c3aed]" />
-        </button>
+        {/* Título Oficial Limpio */}
+        <div className="mt-1 sm:mt-2">
+          <h2 className="font-heading text-base sm:text-lg font-black text-[#0f2147] tracking-tight leading-snug line-clamp-1" title={currentTrack.title}>
+            {currentTrack.title}
+          </h2>
+          <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+            Robert Pacheco &bull; Capítulo {currentTrack.chapterNumber} de {tracks.length}
+          </p>
+
+          {/* Aviso en caso de error de audio */}
+          {audioError && (
+            <div className="mt-1.5 p-1.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-[10px] flex items-center justify-between gap-1.5 text-left">
+              <div className="flex items-center gap-1 overflow-hidden">
+                <AlertCircle className="w-3 h-3 text-amber-600 flex-shrink-0" />
+                <span className="truncate">{audioError}</span>
+              </div>
+              <button
+                type="button"
+                onClick={playAudio}
+                className="px-2 py-0.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[9px] flex items-center gap-1 flex-shrink-0"
+              >
+                <RefreshCw className="w-2.5 h-2.5" />
+                <span>Reintentar</span>
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Barra de Progreso y Tiempo */}
+        <div className="mt-2 px-1">
+          <div className="relative group">
+            <input
+              type="range"
+              min="0"
+              max={duration || 160}
+              value={currentTime}
+              onChange={handleSeek}
+              className="w-full h-1.5 sm:h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#7c3aed] hover:accent-[#6d28d9] transition"
+            />
+          </div>
+          <div className="flex justify-between items-center text-[10px] sm:text-[11px] font-mono text-slate-500 mt-1 font-bold">
+            <span>{formatTime(currentTime)}</span>
+            <span>{formatTime(duration || 160)}</span>
+          </div>
+        </div>
+
+        {/* Botones de Control Principal */}
+        <div className="mt-1.5 sm:mt-2.5 flex items-center justify-center gap-3 sm:gap-6">
+          <button
+            type="button"
+            onClick={handlePrevTrack}
+            disabled={activeTrackIndex === 0}
+            className="p-1.5 text-slate-400 hover:text-[#0f2147] transition disabled:opacity-30 cursor-pointer active:scale-95"
+            title="Capítulo anterior"
+            aria-label="Capítulo anterior"
+          >
+            <SkipBack className="w-5 h-5" />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleSkip(-15)}
+            className="p-1.5 text-slate-500 hover:text-[#7c3aed] transition cursor-pointer active:scale-95"
+            title="Retroceder 15s"
+            aria-label="Retroceder 15s"
+          >
+            <RotateCcw className="w-5 h-5" />
+          </button>
+
+          {/* Botón Púrpura Play / Pausa */}
+          <button
+            type="button"
+            onClick={togglePlay}
+            className="w-13 h-13 sm:w-14 sm:h-14 rounded-full bg-[#7c3aed] hover:bg-[#6d28d9] text-white flex items-center justify-center shadow-lg shadow-[#7c3aed]/40 hover:scale-105 active:scale-95 transition-all duration-200 cursor-pointer"
+            aria-label={isPlaying ? "Pausar" : "Reproducir"}
+          >
+            {isLoadingAudioUrl ? (
+              <Loader2 className="w-6 h-6 animate-spin" />
+            ) : isPlaying ? (
+              <Pause className="w-6 h-6 fill-current" />
+            ) : (
+              <Play className="w-6 h-6 fill-current ml-0.5" />
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleSkip(15)}
+            className="p-1.5 text-slate-500 hover:text-[#7c3aed] transition cursor-pointer active:scale-95"
+            title="Adelantar 15s"
+            aria-label="Adelantar 15s"
+          >
+            <RotateCw className="w-5 h-5" />
+          </button>
+
+          <button
+            type="button"
+            onClick={handleNextTrack}
+            disabled={activeTrackIndex === tracks.length - 1}
+            className="p-1.5 text-slate-400 hover:text-[#0f2147] transition disabled:opacity-30 cursor-pointer active:scale-95"
+            title="Siguiente capítulo"
+            aria-label="Siguiente capítulo"
+          >
+            <SkipForward className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Fila Inferior: Velocidad, Temporizador y Volumen */}
+        <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between text-xs gap-1.5">
+          {/* Velocidad */}
+          <div className="flex items-center rounded-xl bg-slate-100 p-0.5 font-bold">
+            {[0.75, 1.0, 1.25, 1.5].map((rate) => (
+              <button
+                key={rate}
+                type="button"
+                onClick={() => handleSpeedChange(rate)}
+                className={`px-1.5 py-0.5 rounded-lg text-[10px] transition cursor-pointer ${
+                  playbackRate === rate
+                    ? 'bg-white text-[#7c3aed] shadow-2xs font-extrabold'
+                    : 'text-slate-500 hover:text-[#0f2147]'
+                }`}
+              >
+                {rate}x
+              </button>
+            ))}
+          </div>
+
+          {/* Temporizador */}
+          <button
+            type="button"
+            onClick={() => {
+              const options = [null, 5, 15, 30, -1];
+              const currentIndex = options.indexOf(sleepTimerMinutes);
+              const nextOption = options[(currentIndex + 1) % options.length];
+              setSleepTimerMinutes(nextOption);
+            }}
+            className={`flex items-center gap-1 px-2 py-1 rounded-xl text-[10px] sm:text-[11px] font-bold transition cursor-pointer ${
+              sleepTimerMinutes !== null
+                ? 'bg-[#7c3aed] text-white shadow-2xs'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            <Clock className="w-3 h-3" />
+            <span>
+              {sleepTimerRemaining !== null
+                ? `${Math.ceil(sleepTimerRemaining / 60)}m`
+                : sleepTimerMinutes === -1
+                ? 'Fin'
+                : 'Timer'}
+            </span>
+          </button>
+
+          {/* Control de Volumen */}
+          <div className="flex items-center gap-1 text-slate-500">
+            <button type="button" onClick={toggleMute} className="hover:text-[#0f2147] transition cursor-pointer">
+              {isMuted || volume === 0 ? (
+                <VolumeX className="w-3.5 h-3.5 text-red-500" />
+              ) : (
+                <Volume2 className="w-3.5 h-3.5" />
+              )}
+            </button>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value={isMuted ? 0 : volume}
+              onChange={handleVolumeChange}
+              className="w-12 sm:w-16 h-1 bg-slate-200 rounded-lg accent-[#7c3aed] cursor-pointer"
+              title="Volumen"
+            />
+          </div>
+        </div>
+
+        {/* Descarga Offline Integrada Compacta */}
+        <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-center">
+          {isBulkDownloading && bulkProgress ? (
+            <div className="w-full p-2 rounded-xl bg-[#7c3aed]/10 border border-[#7c3aed]/25 flex flex-col gap-1 text-left">
+              <div className="flex items-center justify-between text-[10px] font-bold text-[#7c3aed]">
+                <span className="flex items-center gap-1">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  <span>Guardando {bulkProgress.current} de {bulkProgress.total}...</span>
+                </span>
+                <span>{bulkProgress.percent}%</span>
+              </div>
+              <div className="w-full bg-slate-200/80 rounded-full h-1.5 overflow-hidden">
+                <div 
+                  className="bg-gradient-to-r from-[#7c3aed] to-[#4f96fe] h-full transition-all duration-300 rounded-full"
+                  style={{ width: `${bulkProgress.percent}%` }}
+                />
+              </div>
+            </div>
+          ) : offlineChapterNumbers.size >= 113 ? (
+            <div className="inline-flex items-center gap-1.5 text-emerald-700 text-[10px] font-bold">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+              <span>113 Capítulos listos sin conexión</span>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={handleStartBulkDownload}
+                className="inline-flex items-center gap-1 px-3 py-1 rounded-xl bg-[#7c3aed]/10 hover:bg-[#7c3aed]/20 text-[#7c3aed] text-[10px] font-bold transition cursor-pointer active:scale-95"
+                title="Descargar todos los capítulos en el dispositivo"
+              >
+                <Download className="w-3 h-3" />
+                <span>Descargar audios offline</span>
+              </button>
+              {!offlineChapterNumbers.has(currentTrack.chapterNumber) && (
+                <button
+                  type="button"
+                  onClick={() => handleDownloadOffline(currentTrack.chapterNumber, currentTrack.title, currentTrack.filename)}
+                  disabled={downloadingChapterId === currentTrack.chapterNumber}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 text-[10px] font-bold transition cursor-pointer active:scale-95"
+                >
+                  <Download className="w-3 h-3 text-[#7c3aed]" />
+                  <span>Capítulo actual</span>
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
       </div>
 
       {/* MODAL / DRAWER INTERACTIVO: Lista de Capítulos del Audiolibro (1 al 113) */}

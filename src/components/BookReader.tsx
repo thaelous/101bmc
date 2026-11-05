@@ -4,16 +4,11 @@ import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
 import { 
   Maximize2, 
   Minimize2, 
-  BookOpen, 
   Bookmark, 
-  BookmarkCheck,
+  BookmarkCheck, 
   ChevronLeft, 
   ChevronRight, 
-  Loader2,
-  ZoomIn,
-  ZoomOut,
-  RotateCcw,
-  Check
+  Loader2 
 } from 'lucide-react';
 import { saveBookmarkedPage, getBookmarkedPage } from '../firebase/config';
 
@@ -58,6 +53,9 @@ export const BookReader: React.FC<BookReaderProps> = ({
   const pdfDocRef = useRef<PDFDocumentProxy | null>(null);
   const currentRenderTaskRef = useRef<RenderTask | null>(null);
   const touchStartXRef = useRef<number | null>(null);
+  const touchStartYRef = useRef<number | null>(null);
+  const pinchStartDistRef = useRef<number | null>(null);
+  const initialZoomRef = useRef<number>(1.0);
 
   // Estado de la página actual guardada en localStorage
   const [currentPage, setCurrentPage] = useState<number>(() => {
@@ -185,24 +183,23 @@ export const BookReader: React.FC<BookReaderProps> = ({
       const page = await pdf.getPage(currentPage);
       const baseViewport = page.getViewport({ scale: 1.0 });
 
-      // Obtener ancho y alto disponibles en el contenedor
-      const containerWidth = Math.max(container.clientWidth - 32, 280);
-      const containerHeight = Math.max(container.clientHeight - 40, 420);
+      // Obtener ancho y alto disponibles en el contenedor (maximizando área de lectura)
+      const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
+      const padX = isMobile ? 8 : 20;
+      const padY = isMobile ? 8 : 20;
+      const containerWidth = Math.max(container.clientWidth - padX, 200);
+      const containerHeight = Math.max(container.clientHeight - padY, 200);
 
-      // Escalar para que encaje de manera óptima y legible
+      // Escalar para que encaje al 100% en la pantalla ("Fit to screen / Fit to page")
+      // Esto asegura que toda la página del libro se vea completa en la pantalla del celular sin recortes
       const scaleFitWidth = containerWidth / baseViewport.width;
       const scaleFitHeight = containerHeight / baseViewport.height;
 
-      // En móviles preferimos ajuste al ancho, en pantallas grandes ajuste proporcional
-      const isMobile = window.innerWidth < 768;
-      let calculatedScale = isMobile 
-        ? scaleFitWidth * zoomFactor 
-        : Math.min(scaleFitWidth, scaleFitHeight) * zoomFactor;
+      // Fit to page: usar la menor escala para que ni el ancho ni el alto se recorten en la pantalla
+      const fitPageScale = Math.min(scaleFitWidth, scaleFitHeight);
+      const calculatedScale = fitPageScale * zoomFactor;
 
-      // Garantizar un mínimo legible
-      if (calculatedScale < 0.6) calculatedScale = 0.6;
-
-      const dpr = window.devicePixelRatio || 1;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
       const viewport = page.getViewport({ scale: calculatedScale * dpr });
 
       canvas.width = Math.floor(viewport.width);
@@ -239,22 +236,36 @@ export const BookReader: React.FC<BookReaderProps> = ({
     }
   }, [isLoadingDoc, currentPage, zoomFactor, renderCurrentPage]);
 
-  // Reajustar al redimensionar ventana
+  // Reajustar automáticamente con ResizeObserver y resize de ventana
   useEffect(() => {
     let timeoutId: NodeJS.Timeout;
     const handleResize = () => {
       clearTimeout(timeoutId);
       timeoutId = setTimeout(() => {
-        renderCurrentPage();
-      }, 150);
+        if (!isLoadingDoc && pdfDocRef.current) {
+          renderCurrentPage();
+        }
+      }, 100);
     };
 
     window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleResize);
+
+    let observer: ResizeObserver | null = null;
+    if (containerRef.current) {
+      observer = new ResizeObserver(() => {
+        handleResize();
+      });
+      observer.observe(containerRef.current);
+    }
+
     return () => {
       window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', handleResize);
+      observer?.disconnect();
       clearTimeout(timeoutId);
     };
-  }, [renderCurrentPage]);
+  }, [isLoadingDoc, renderCurrentPage]);
 
   // Sincronizar input con currentPage
   useEffect(() => {
@@ -324,8 +335,18 @@ export const BookReader: React.FC<BookReaderProps> = ({
     return () => { isMounted = false; };
   }, [userEmail, totalPages]);
 
+  // Notificar al Navbar sobre el estado del marcador
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('bmc-bookmark-status', {
+      detail: {
+        bookmarkedPage,
+        isCurrentPageBookmarked: bookmarkedPage === currentPage
+      }
+    }));
+  }, [bookmarkedPage, currentPage]);
+
   // Guardar página actual como marcador (favorito) en Firestore y localStorage
-  const handleBookmarkCurrentPage = async () => {
+  const handleBookmarkCurrentPage = useCallback(async () => {
     const pageToBookmark = currentPage;
     setIsSavingBookmark(true);
     setBookmarkedPage(pageToBookmark);
@@ -346,12 +367,16 @@ export const BookReader: React.FC<BookReaderProps> = ({
     setTimeout(() => {
       setBookmarkToast(null);
     }, 2800);
-  };
+  }, [currentPage, userEmail]);
 
-  // Controles de zoom
-  const zoomIn = () => setZoomFactor(prev => Math.min(prev + 0.15, 2.0));
-  const zoomOut = () => setZoomFactor(prev => Math.max(prev - 0.15, 0.7));
-  const resetZoom = () => setZoomFactor(1.0);
+  // Escuchar trigger de marcador desde el Navbar
+  useEffect(() => {
+    const handleTrigger = () => {
+      handleBookmarkCurrentPage();
+    };
+    window.addEventListener('bmc-bookmark-trigger', handleTrigger);
+    return () => window.removeEventListener('bmc-bookmark-trigger', handleTrigger);
+  }, [handleBookmarkCurrentPage]);
 
   // Atajos de teclado (← y → para hojear)
   useEffect(() => {
@@ -371,24 +396,57 @@ export const BookReader: React.FC<BookReaderProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [currentPage, totalPages]);
 
-  // Gestos táctiles (Swipe izquierdo/derecho en móvil)
+  // Gestos táctiles nativos y de pellizco (zoom con 2 dedos) y swipe de página (1 dedo)
   const handleTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 1) {
       touchStartXRef.current = e.touches[0].clientX;
+      touchStartYRef.current = e.touches[0].clientY;
+      pinchStartDistRef.current = null;
+    } else if (e.touches.length === 2) {
+      touchStartXRef.current = null;
+      touchStartYRef.current = null;
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      pinchStartDistRef.current = dist;
+      initialZoomRef.current = zoomFactor;
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length === 2 && pinchStartDistRef.current !== null && pinchStartDistRef.current > 0) {
+      const currentDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      const scale = currentDist / pinchStartDistRef.current;
+      const newZoom = Math.min(2.5, Math.max(0.75, initialZoomRef.current * scale));
+      setZoomFactor(parseFloat(newZoom.toFixed(2)));
     }
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
-    if (touchStartXRef.current === null) return;
+    if (pinchStartDistRef.current !== null) {
+      pinchStartDistRef.current = null;
+      return;
+    }
+    // Si la página tiene aumento (> 1.2x), permitir navegación y paneo libre sin pasar página por error
+    if (touchStartXRef.current === null || zoomFactor > 1.2) return;
     const touchEndX = e.changedTouches[0].clientX;
+    const touchEndY = e.changedTouches[0].clientY;
     const diffX = touchEndX - touchStartXRef.current;
+    const diffY = touchEndY - (touchStartYRef.current ?? touchEndY);
     touchStartXRef.current = null;
+    touchStartYRef.current = null;
 
-    // Umbral de 50px para detectar deslizamiento
-    if (diffX > 50) {
-      handlePrevPage(); // Deslizar hacia la derecha -> página anterior
-    } else if (diffX < -50) {
-      handleNextPage(); // Deslizar hacia la izquierda -> página siguiente
+    // Umbral de 45px y dirección predominantemente horizontal
+    if (Math.abs(diffX) > 45 && Math.abs(diffX) > Math.abs(diffY) * 1.3) {
+      if (diffX > 0) {
+        handlePrevPage(); // Deslizar hacia la derecha -> página anterior
+      } else {
+        handleNextPage(); // Deslizar hacia la izquierda -> página siguiente
+      }
     }
   };
 
@@ -397,7 +455,8 @@ export const BookReader: React.FC<BookReaderProps> = ({
   return (
     <div 
       ref={containerRef}
-      className={`w-full ${isSideBySide ? 'max-w-none px-0 py-0' : 'max-w-5xl mx-auto px-2 sm:px-4 md:px-6 py-1 sm:py-2'} flex-1 flex flex-col select-none pb-20 sm:pb-24 relative`}
+      className={`w-full ${isSideBySide ? 'max-w-none px-0 py-0' : 'max-w-5xl mx-auto px-1 sm:px-4 md:px-6 py-0.5 sm:py-2'} flex-1 flex flex-col pb-16 sm:pb-24 relative`}
+      style={{ touchAction: 'pan-x pan-y pinch-zoom' }}
     >
       {/* Toast sutil de confirmación del marcador guardado */}
       {bookmarkToast && (
@@ -407,137 +466,19 @@ export const BookReader: React.FC<BookReaderProps> = ({
         </div>
       )}
 
-      {/* 2. PARTE SUPERIOR: ÚNICAMENTE ICONO DE SEPARADOR VISUAL Y PANTALLA COMPLETA */}
-      <div className="glass-card rounded-2xl px-3 sm:px-4 py-2.5 mb-2.5 shadow-sm flex items-center justify-between border border-slate-200/90 bg-white/95 backdrop-blur-md">
-        
-        {/* Título de la obra */}
-        <div className="flex items-center gap-2">
-          <BookOpen className="w-4 h-4 text-amber-500 flex-shrink-0" />
-          <h2 className="font-heading text-xs sm:text-sm font-black text-neutral-900 uppercase tracking-tight truncate">
-            101 buenos malos consejos para mi hijo
-          </h2>
-        </div>
-
-        {/* Iconos superiores minimalistas y elegantes */}
-        <div className="flex items-center gap-2">
-          {/* Zoom rápido opcional y sutil */}
-          <div className="hidden sm:flex items-center gap-1 bg-neutral-100/80 rounded-xl p-0.5 border border-neutral-200/80">
-            <button
-              type="button"
-              onClick={zoomOut}
-              className="p-1.5 rounded-lg hover:bg-white text-neutral-600 hover:text-neutral-900 transition"
-              title="Reducir zoom"
-            >
-              <ZoomOut className="w-3.5 h-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={resetZoom}
-              className="px-1.5 py-1 text-[11px] font-bold text-neutral-700 hover:bg-white rounded-lg transition"
-              title="Restablecer zoom"
-            >
-              {Math.round(zoomFactor * 100)}%
-            </button>
-            <button
-              type="button"
-              onClick={zoomIn}
-              className="p-1.5 rounded-lg hover:bg-white text-neutral-600 hover:text-neutral-900 transition"
-              title="Aumentar zoom"
-            >
-              <ZoomIn className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          {/* Botón de separador / marcador interactivo con confirmación visual */}
-          <button
-            type="button"
-            onClick={handleBookmarkCurrentPage}
-            className={`relative p-2 rounded-xl transition-all shadow-2xs flex items-center justify-center cursor-pointer active:scale-95 ${
-              isCurrentPageBookmarked
-                ? 'bg-amber-500 text-white border border-amber-600 ring-2 ring-amber-400/40 shadow-sm'
-                : 'bg-amber-50 hover:bg-amber-100/90 text-amber-800 border border-amber-200/80 hover:border-amber-300'
-            }`}
-            title={
-              isCurrentPageBookmarked
-                ? `Esta página (${currentPage}) está marcada en tu separador`
-                : `Guardar página ${currentPage} como marcador`
-            }
-            aria-label="Guardar marcador de página"
-          >
-            {isCurrentPageBookmarked ? (
-              <BookmarkCheck className={`w-4 h-4 text-white fill-white ${isSavingBookmark ? 'scale-125' : ''} transition-transform`} />
-            ) : (
-              <Bookmark className={`w-4 h-4 text-amber-600 fill-amber-500/80 ${isSavingBookmark ? 'scale-125' : ''} transition-transform`} />
-            )}
-            {bookmarkedPage !== null && (
-              <span 
-                className={`absolute -bottom-1 -right-1 text-[9px] font-black px-1 rounded-full border leading-tight ${
-                  isCurrentPageBookmarked
-                    ? 'bg-white text-amber-800 border-amber-600'
-                    : 'bg-amber-800 text-white border-white'
-                }`}
-                title={`Marcador guardado en pág. ${bookmarkedPage}`}
-              >
-                {bookmarkedPage}
-              </span>
-            )}
-          </button>
-
-          {/* Icono minimalista de pantalla completa */}
-          <button
-            type="button"
-            onClick={toggleFullscreen}
-            className="p-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-white transition shadow-2xs cursor-pointer flex items-center justify-center active:scale-95"
-            title={isFullscreen ? "Salir de pantalla completa" : "Pantalla completa"}
-            aria-label="Pantalla completa"
-          >
-            {isFullscreen ? (
-              <Minimize2 className="w-4 h-4 text-amber-400" />
-            ) : (
-              <Maximize2 className="w-4 h-4 text-amber-400" />
-            )}
-          </button>
-        </div>
-      </div>
-
-      {/* 3. VISOR NATIVO DE PDF PROPIO: RENDERIZACIÓN DIRECTA EN CANVAS SIN EXTERNOS */}
+      {/* VISOR NATIVO DE PDF PROPIO: ÁREA DE LECTURA MAXIMIZADA */}
       <div 
-        className="w-full flex-1 flex flex-col items-center justify-center rounded-2xl sm:rounded-3xl overflow-auto shadow-xl relative border-2 border-slate-300/80 bg-neutral-800/90 ring-1 ring-black/10 group p-2 sm:p-4"
+        className="w-full flex-1 flex flex-col items-center justify-center rounded-2xl sm:rounded-3xl overflow-auto shadow-xl relative border-2 border-slate-300/80 bg-neutral-900/95 ring-1 ring-black/10 group p-1 sm:p-2 touch-pan-x touch-pan-y"
         style={{ 
-          minHeight: isFullscreen ? 'calc(100vh - 120px)' : '620px',
-          height: isFullscreen ? 'calc(100vh - 120px)' : '78vh'
+          minHeight: isFullscreen ? 'calc(100dvh - 16px)' : 'calc(100dvh - 85px)',
+          height: isFullscreen ? 'calc(100dvh - 16px)' : 'calc(100dvh - 85px)',
+          touchAction: 'pan-x pan-y pinch-zoom'
         }}
         onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         onContextMenu={(e) => e.preventDefault()} // Ocultar menú contextual de guardado
       >
-        {/* Botón flotante lateral izquierdo para hojear hacia atrás */}
-        <button
-          type="button"
-          onClick={handlePrevPage}
-          disabled={currentPage <= 1}
-          className={`absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 z-20 p-2.5 sm:p-3 rounded-full bg-neutral-900/85 hover:bg-neutral-900 text-white backdrop-blur-md shadow-xl border border-white/20 transition-all cursor-pointer ${
-            currentPage <= 1 ? 'opacity-0 pointer-events-none' : 'opacity-70 hover:opacity-100 hover:scale-105 active:scale-95'
-          }`}
-          title="Página anterior (←)"
-          aria-label="Página anterior"
-        >
-          <ChevronLeft className="w-5 h-5 sm:w-6 sm:h-6 text-amber-400" />
-        </button>
-
-        {/* Botón flotante lateral derecho para hojear hacia adelante */}
-        <button
-          type="button"
-          onClick={handleNextPage}
-          disabled={currentPage >= totalPages}
-          className={`absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 z-20 p-2.5 sm:p-3 rounded-full bg-neutral-900/85 hover:bg-neutral-900 text-white backdrop-blur-md shadow-xl border border-white/20 transition-all cursor-pointer ${
-            currentPage >= totalPages ? 'opacity-0 pointer-events-none' : 'opacity-70 hover:opacity-100 hover:scale-105 active:scale-95'
-          }`}
-          title="Página siguiente (→)"
-          aria-label="Página siguiente"
-        >
-          <ChevronRight className="w-5 h-5 sm:w-6 sm:h-6 text-amber-400" />
-        </button>
 
         {/* Indicador de carga inicial del documento con barra de progreso */}
         {isLoadingDoc && (
@@ -592,36 +533,40 @@ export const BookReader: React.FC<BookReaderProps> = ({
         </div>
       </div>
 
-      {/* 4. BARRA INFERIOR FIJA: NAVEGACIÓN Y SALTO DE PÁGINA INSTANTÁNEO */}
+      {/* 2. NAVEGACIÓN INFERIOR MINIMALISTA CON SLIDER Y SALTO ESTRICTAMENTE A LA DERECHA */}
       <nav 
-        className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/90 shadow-[0_-4px_20px_rgba(0,0,0,0.08)] py-2.5 px-4"
-        aria-label="Controles de lectura"
+        className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/90 shadow-[0_-4px_20px_rgba(0,0,0,0.08)] py-2 px-3 sm:px-6 pb-[max(0.6rem,env(safe-area-inset-bottom))]"
+        aria-label="Navegación de páginas"
       >
-        <div className="max-w-md mx-auto flex items-center justify-between gap-3">
-          {/* Botón Retroceder de página */}
-          <button
-            type="button"
-            onClick={handlePrevPage}
-            disabled={currentPage <= 1 || isLoadingDoc}
-            className={`flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition shadow-2xs ${
-              currentPage <= 1 || isLoadingDoc
-                ? 'bg-neutral-100 text-neutral-400 cursor-not-allowed border border-neutral-200' 
-                : 'bg-neutral-900 hover:bg-neutral-800 text-white cursor-pointer active:scale-95'
-            }`}
-            title="Página anterior (←)"
-          >
-            <ChevronLeft className="w-4 h-4 text-amber-400" />
-            <span className="hidden sm:inline">Anterior</span>
-          </button>
+        <div className="max-w-2xl mx-auto flex items-center justify-between gap-3 sm:gap-4">
+          
+          {/* Barra deslizante (slider) horizontal conectada a las páginas del PDF */}
+          <div className="flex-1 flex items-center gap-2 sm:gap-3">
+            <span className="text-[11px] font-bold text-neutral-600 font-mono select-none min-w-[20px] text-right">
+              {currentPage}
+            </span>
+            <input
+              type="range"
+              min={1}
+              max={totalPages}
+              value={currentPage}
+              onChange={(e) => {
+                const val = parseInt(e.target.value, 10);
+                if (!isNaN(val)) goToPage(val);
+              }}
+              className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#7c3aed] transition"
+              title="Desliza para hojear las páginas del libro"
+            />
+            <span className="text-[11px] font-bold text-neutral-400 font-mono select-none min-w-[24px]">
+              {totalPages}
+            </span>
+          </div>
 
-          {/* Pequeño recuadro de entrada de texto (input numérico) con Enter para saltar */}
+          {/* Estrictamente a la derecha: pequeño cuadro de texto numérico para escribir el número de página */}
           <form 
             onSubmit={handlePageJump} 
-            className="flex items-center gap-1.5 bg-neutral-100 border border-neutral-300/80 rounded-xl px-2.5 py-1 shadow-inner"
+            className="flex items-center gap-1.5 flex-shrink-0"
           >
-            <label htmlFor="page-jump-input" className="text-xs font-semibold text-neutral-600 select-none">
-              Pág.
-            </label>
             <input
               id="page-jump-input"
               type="number"
@@ -634,37 +579,19 @@ export const BookReader: React.FC<BookReaderProps> = ({
                   handlePageJump();
                 }
               }}
-              className="w-12 sm:w-14 text-center font-bold text-xs sm:text-sm text-neutral-900 bg-white border border-neutral-300 rounded-lg py-0.5 focus:outline-none focus:ring-2 focus:ring-amber-500 shadow-2xs"
+              className="w-12 sm:w-14 text-center font-bold text-xs sm:text-sm text-neutral-900 bg-neutral-100 border border-neutral-300 rounded-xl py-1 px-1 focus:outline-none focus:ring-2 focus:ring-[#7c3aed] shadow-inner"
               placeholder="1"
-              title="Escribe el número de página y presiona Enter"
+              title="Escribe el número de página y presiona Enter o Ir"
             />
-            <span className="text-xs text-neutral-500 font-semibold select-none">
-              de {totalPages}
-            </span>
             <button
               type="submit"
-              className="px-2.5 py-1 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-white text-[11px] font-bold transition cursor-pointer shadow-2xs active:scale-95"
-              title="Saltar a esta página (Enter)"
+              className="px-2.5 py-1 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-white text-[11px] font-bold transition cursor-pointer shadow-2xs active:scale-95"
+              title="Saltar a esta página"
             >
               Ir
             </button>
           </form>
 
-          {/* Botón Avanzar de página */}
-          <button
-            type="button"
-            onClick={handleNextPage}
-            disabled={currentPage >= totalPages || isLoadingDoc}
-            className={`flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition shadow-2xs ${
-              currentPage >= totalPages || isLoadingDoc
-                ? 'bg-neutral-100 text-neutral-400 cursor-not-allowed border border-neutral-200'
-                : 'bg-neutral-900 hover:bg-neutral-800 text-white cursor-pointer active:scale-95'
-            }`}
-            title="Página siguiente (→)"
-          >
-            <span className="hidden sm:inline">Siguiente</span>
-            <ChevronRight className="w-4 h-4 text-amber-400" />
-          </button>
         </div>
       </nav>
     </div>
