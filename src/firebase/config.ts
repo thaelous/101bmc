@@ -846,43 +846,16 @@ export async function fetchAudiolibroTracksFromStorage(): Promise<AudioTrackItem
 
 import { getOfficialChapterAudioUrl } from '../data/officialAudioUrls';
 
-// Caché en memoria para URLs de audio ya obtenidas
-const audioUrlMemoryCache = new Map<number, string>();
-
 /**
- * Obtiene la URL de descarga o streaming directo oficial del capítulo.
- * Utiliza los enlaces directos oficiales con respaldo en Firebase Storage SDK.
+ * Obtiene la URL de descarga o streaming directo oficial de Firebase Storage para el capítulo.
+ * Patrón oficial: https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F{NOMBRE_DEL_ARCHIVO}?alt=media
  */
 export async function getChapterAudioDownloadUrl(
   chapterNumber: number, 
   customFilename?: string
 ): Promise<string> {
-  if (audioUrlMemoryCache.has(chapterNumber)) {
-    return audioUrlMemoryCache.get(chapterNumber)!;
-  }
-
-  // 1. URL directa oficial de audio
-  const officialUrl = getOfficialChapterAudioUrl(chapterNumber);
-  if (officialUrl) {
-    audioUrlMemoryCache.set(chapterNumber, officialUrl);
-    return officialUrl;
-  }
-
-  // 2. Respaldo directo en Firebase Storage SDK
   const filename = customFilename || `101bmc${chapterNumber}of113.mp3`;
-  const storagePath = `audiolibro/${filename}`;
-
-  try {
-    const downloadUrl = await resolveStorageDownloadUrlWithPromises(storagePath);
-    if (downloadUrl) {
-      audioUrlMemoryCache.set(chapterNumber, downloadUrl);
-      return downloadUrl;
-    }
-  } catch (err: any) {
-    console.warn(`[Firebase Storage] Error en getDownloadURL para ${storagePath}:`, err?.message || err);
-  }
-
-  throw new Error(`No se pudo obtener URL para el capítulo ${chapterNumber}`);
+  return getOfficialChapterAudioUrl(chapterNumber, filename);
 }
 
 // ============================================================================

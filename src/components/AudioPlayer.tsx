@@ -234,24 +234,18 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         }
 
         let resolvedUrl: string | null = null;
-        let onlineUrl: string | null = currentTrack.audioUrl || getOfficialChapterAudioUrl(currentTrack.chapterNumber) || null;
-        if (!onlineUrl && navigator.onLine) {
-          try {
-            onlineUrl = await getChapterAudioDownloadUrl(currentTrack.chapterNumber, currentTrack.filename);
-          } catch {}
-        }
-
-        const isOffline = await isChapterOfflineAvailable(currentTrack.chapterNumber, onlineUrl || undefined);
+        const onlineUrl: string = getOfficialChapterAudioUrl(currentTrack.chapterNumber, currentTrack.filename);
+        const isOffline = await isChapterOfflineAvailable(currentTrack.chapterNumber, onlineUrl);
 
         // 1. Si está disponible en el almacén offline (IndexedDB o Cache API), reproducir desde blob local
         if (isOffline) {
-          resolvedUrl = await getDecryptedChapterAudioUrl(currentTrack.chapterNumber, onlineUrl || undefined);
+          resolvedUrl = await getDecryptedChapterAudioUrl(currentTrack.chapterNumber, onlineUrl);
           if (resolvedUrl) {
             activeBlobUrlRef.current = resolvedUrl;
           }
         }
 
-        // 2. Si no estaba guardado offline, usar onlineUrl para streaming directo
+        // 2. Si no estaba guardado offline, usar la URL directa de Firebase Storage para streaming
         if (!resolvedUrl && onlineUrl) {
           resolvedUrl = onlineUrl;
         }
@@ -352,17 +346,11 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
       setIsLoadingAudioUrl(true);
       try {
         let url: string | null = null;
-        let onlineUrl: string | null = currentTrack.audioUrl || getOfficialChapterAudioUrl(currentTrack.chapterNumber) || null;
-        if (!onlineUrl && navigator.onLine) {
-          try {
-            onlineUrl = await getChapterAudioDownloadUrl(currentTrack.chapterNumber, currentTrack.filename);
-          } catch {}
-        }
-
-        const isOffline = await isChapterOfflineAvailable(currentTrack.chapterNumber, onlineUrl || undefined);
+        const onlineUrl: string = getOfficialChapterAudioUrl(currentTrack.chapterNumber, currentTrack.filename);
+        const isOffline = await isChapterOfflineAvailable(currentTrack.chapterNumber, onlineUrl);
 
         if (isOffline) {
-          url = await getDecryptedChapterAudioUrl(currentTrack.chapterNumber, onlineUrl || undefined);
+          url = await getDecryptedChapterAudioUrl(currentTrack.chapterNumber, onlineUrl);
           if (url) {
             if (activeBlobUrlRef.current) URL.revokeObjectURL(activeBlobUrlRef.current);
             activeBlobUrlRef.current = url;

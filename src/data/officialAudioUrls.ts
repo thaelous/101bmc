@@ -1,128 +1,26 @@
 /**
  * URLs Oficiales de Streaming y Descarga de los 113 Capítulos del Audiolibro
  * "101 Buenos Malos Consejos" - Robert Pacheco
- * Alojados oficialmente en Firebase Storage / Netlify con soporte nativo HTTP/2 206 Partial Content
+ * 
+ * Bucket Oficial: libros-1f750.firebasestorage.app
+ * Carpeta: audiolibro/
+ * Patrón: https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F{NOMBRE_DEL_ARCHIVO}?alt=media
  */
 
-export const OFFICIAL_AUDIO_URLS: Record<number, string> = {
-  1: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc1of113.mp3?alt=media&token=47931156-688c-4680-bc91-37e9ca62377b",
-  2: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc2of113.mp3?alt=media&token=4d652a88-9b47-41d6-8de1-5672c38a9d39",
-  3: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc3of113.mp3?alt=media&token=9a7e06b0-d484-49f4-bda1-9e358da1c4ff",
-  4: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc4of113.mp3?alt=media&token=489c9f6b-4a57-42ca-b542-fa9862748709",
-  5: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc5of113.mp3?alt=media&token=bc64fb94-b8ed-4bbe-b450-e43ac1b07554",
-  6: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc6of113.mp3?alt=media&token=291519f8-bed0-4e0a-8510-318e9a4c27fa",
-  7: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc7of113.mp3?alt=media&token=170a19b5-948f-4965-bb4e-65bac5bb5489",
-  8: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc8of113.mp3?alt=media&token=e32312a2-ea9d-4d43-b7c7-0dae2a3c0fd3",
-  9: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc9of113.mp3?alt=media&token=468bf620-46c0-4112-90f5-1c324e0d674b",
-  10: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc10of113.mp3?alt=media&token=e4377cd2-a0c6-4528-be43-b44833083bc0",
-  11: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc11of113.mp3?alt=media&token=7d495512-b63b-4e7f-b259-845511c0b803",
-  12: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc12of113.mp3?alt=media&token=fadfe66c-f0f1-4db1-976e-24ce0931b717",
-  13: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc13of113.mp3?alt=media&token=8626f671-12a9-4739-91a3-4598886ec793",
-  14: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc14of113.mp3?alt=media&token=3207b1fd-8335-4129-8139-2bd455d41e52",
-  15: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc15of113.mp3?alt=media&token=0b731661-dc45-4ec0-a136-f0db7602ccc7",
-  16: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc16of113.mp3?alt=media&token=02c69d9f-686d-47c8-9c6d-a42487da9f8c",
-  17: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc17of113.mp3?alt=media&token=c1a84198-1205-4bd1-8a9d-c465ff8e7129",
-  18: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc18of113.mp3?alt=media&token=d5a73a74-4d65-4e04-9758-7d40fd8694cd",
-  19: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc19of113.mp3?alt=media&token=b307c464-6e26-490f-8692-b97d13cde200",
-  20: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc20of113.mp3?alt=media&token=cff4cf05-adc5-4a9c-a87c-8f7681501bdc",
-  21: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc21of113.mp3?alt=media&token=f058569c-e756-4517-87f8-3498b3642278",
-  22: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc22of113.mp3?alt=media&token=fc621f9a-7d0a-484a-99fa-2506ac4d70b4",
-  23: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc23of113.mp3?alt=media&token=c467f16f-31a6-44b1-876e-0d820b68f3f4",
-  24: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc24of113.mp3?alt=media&token=19286253-9511-4563-af93-9c724315a419",
-  25: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc25of113.mp3?alt=media&token=e3bc92b1-b050-4cc8-80dd-3715fb26c5c3",
-  26: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc26of113.mp3?alt=media&token=0bb29f45-084f-4fe5-b279-a56c3eb3e6ef",
-  27: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc27of113.mp3?alt=media&token=b9dcd48a-a45f-471f-a495-53227e1d238d",
-  28: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc28of113.mp3?alt=media&token=3f8fbb4d-caef-4782-b9bb-54f2257c187c",
-  29: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc29of113.mp3?alt=media&token=cbecff2d-25eb-405b-a319-f8efd474c77d",
-  30: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc30of113.mp3?alt=media&token=1b466fcb-fb48-4ed7-a926-af21f11be54f",
-  31: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc31of113.mp3?alt=media&token=7b322d23-338d-488d-b6c0-5c21629f9d55",
-  32: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc32of113.mp3?alt=media&token=d7867a0e-3b85-47b8-95a8-636dad6a9a4d",
-  33: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc33of113.mp3?alt=media&token=927fd82e-15c9-4c55-8889-f021a3c56e76",
-  34: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc34of113.mp3?alt=media&token=61c19264-1ca9-4b1f-badd-90929d6b38c0",
-  35: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc35of113.mp3?alt=media&token=6575e239-9eca-40de-949e-3234b7c1849d",
-  36: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc36of113.mp3?alt=media&token=96777db5-1f00-41a1-80f1-4b7a95d141e1",
-  37: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc37of113.mp3?alt=media&token=71191a14-4138-4f74-84a4-74af74f5e31b",
-  38: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc38of113.mp3?alt=media&token=442bfade-155f-4a1c-93ea-02aff4823d9f",
-  39: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc39of113.mp3?alt=media&token=9430d5e6-0f55-4dc6-82c5-9b2fddd7d509",
-  40: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc40of113.mp3?alt=media&token=d531f518-88af-4659-82d0-90ef3b6b754e",
-  41: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc41of113.mp3?alt=media&token=c8956941-eea6-468e-824a-03209ddfde7d",
-  42: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc42of113.mp3?alt=media&token=0f8e8600-7005-4a92-ae63-6443612f86f2",
-  43: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc43of113.mp3?alt=media&token=80ce898e-034a-4461-a121-2c6c3f29cd89",
-  44: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc44of113.mp3?alt=media&token=5b33dbd9-7cb6-4764-8876-dc7925510d72",
-  45: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc45of113.mp3?alt=media&token=a5c1a0e0-b2a7-4af9-926d-5ac96acc9b0a",
-  46: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc46of113.mp3?alt=media&token=0a25b70e-48e9-41c8-a277-d97a0395d1dd",
-  47: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc47of113.mp3?alt=media&token=ac800ea9-e402-45f1-ae71-53a24030cfcd",
-  48: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc48of113.mp3?alt=media&token=d43b4ea0-26b9-4282-a749-925204212646",
-  49: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc49of113.mp3?alt=media&token=0febb560-4810-4a1f-83ed-990ccf5eef25",
-  50: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc50of113.mp3?alt=media&token=2fd31009-d958-417b-b673-02c2df2eed77",
-  51: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc51of113.mp3?alt=media&token=9dd92043-e667-4b9a-b78d-988eecd8d5cd",
-  52: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc52of113.mp3?alt=media&token=9ba5a3f3-350e-41b6-af9a-42906e4f39af",
-  53: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc53of113.mp3?alt=media&token=9c0342e8-9fe0-43bf-9c22-6eb7b93a00fb",
-  54: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc54of113.mp3?alt=media&token=23f02ad2-72a7-4ec0-ad7b-01af043edb1a",
-  55: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc55of113.mp3?alt=media&token=6ae35a66-3d88-46e7-b34c-d4c9f63f13eb",
-  56: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc56of113.mp3?alt=media&token=f335bc9d-7f12-4f28-bccf-0c97e9d8ba8a",
-  57: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc57of113.mp3?alt=media&token=c188084c-58bf-4e8b-8a6d-b1583942273d",
-  58: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc58of113.mp3?alt=media&token=485462de-03c8-4d8e-ba99-1a251f0bce77",
-  59: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc59of113.mp3?alt=media&token=fb043973-d1a7-4016-8132-8aaf94e9fe29",
-  60: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc60of113.mp3?alt=media&token=f1b76292-3d65-47be-9330-bac7009e38e7",
-  61: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc61of113.mp3?alt=media&token=fb0ba7d0-8a03-4c3e-9eeb-224b711d15a4",
-  62: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc62of113.mp3?alt=media&token=58986972-2f45-454a-9b60-baa1ee1a50e0",
-  63: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc63of113.mp3?alt=media&token=a19fb9d2-a020-4a39-ab8c-5f3e8a27a0ce",
-  64: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc64of113.mp3?alt=media&token=2db215a6-3bfa-4c88-96a1-e867d939062d",
-  65: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc65of113.mp3?alt=media&token=8f0c9397-17a2-461d-8f25-4acf49eab81b",
-  66: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc66of113.mp3?alt=media&token=7807e822-ee8a-4a73-9b84-4a334dbee4f1",
-  67: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc67of113.mp3?alt=media&token=02f4b49f-8a2a-4fa9-9a57-4b5dc5a24b8e",
-  68: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc68of113.mp3?alt=media&token=b504d75b-fb05-47bf-aa80-08cad5ff2f47",
-  69: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc69of113.mp3?alt=media&token=caef580c-03db-423e-a8b5-7d8e06760e3d",
-  70: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc70of113.mp3?alt=media&token=8c0d5b63-df8d-4cce-956f-522bfdfd950f",
-  71: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc71of113.mp3?alt=media&token=c4b55860-2d13-4759-ac0a-de1d2e4a4fa7",
-  72: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc72of113.mp3?alt=media&token=c1f61b48-c8ee-4ef1-b0bd-b812e5f8fcaa",
-  73: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc73of113.mp3?alt=media&token=8c68c3cd-77da-40c4-9d24-5e6b3c2576be",
-  74: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc74of113.mp3?alt=media&token=e88779cb-219a-4de6-9e9b-1bb8b464b8fe",
-  75: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc75of113.mp3?alt=media&token=affb067e-8bbb-49b6-a9c4-5e45e85cbbca",
-  76: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc76of113.mp3?alt=media&token=ae097637-5205-4ca7-a956-04411dce0765",
-  77: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc77of113.mp3?alt=media&token=fc179cfa-5eef-46fe-81d4-30c38871b9ee",
-  78: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc78of113.mp3?alt=media&token=aac68e4f-4fb1-42ea-98db-a86f09b2137d",
-  79: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc79of113.mp3?alt=media&token=36762e9e-a288-4566-a16e-44fbc8928ced",
-  80: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc80of113.mp3?alt=media&token=86f794e6-a2df-4d61-b8fb-82c50c798948",
-  81: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc81of113.mp3?alt=media&token=93429f5f-a1aa-42d4-9722-73c01e4b3eb4",
-  82: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc82of113.mp3?alt=media&token=6aca0064-6bb4-400d-90a1-fdae9093669c",
-  83: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc83of113.mp3?alt=media&token=009dfaa8-8bff-45e6-91ed-20a41c7c3ab7",
-  84: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc84of113.mp3?alt=media&token=b394cf33-b2d2-4df1-9e85-297823f862b6",
-  85: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc85of113.mp3?alt=media&token=0b123bad-e016-4024-905b-1a75356314a3",
-  86: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc86of113.mp3?alt=media&token=6d49808a-5e39-4eaa-af44-419823b61742",
-  87: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc87of113.mp3?alt=media&token=d2211532-6b76-4a10-b0d7-fe38a1b1c1dc",
-  88: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc88of113.mp3?alt=media&token=0a951ebd-bd4a-47f1-b765-6c9517a5b1a7",
-  89: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc89of113.mp3?alt=media&token=75510b5b-fa63-4281-b932-eb5f8c5d47c9",
-  90: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc90of113.mp3?alt=media&token=27969870-99ba-4469-a658-39461e18411c",
-  91: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc91of113.mp3?alt=media&token=e70a1cb9-c087-4999-bef5-3ccbfc02c4cb",
-  92: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc92of113.mp3?alt=media&token=cd833867-df88-4181-ba78-cb45262f739c",
-  93: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc93of113.mp3?alt=media&token=fe846a80-102d-4f06-846c-f2cf2629bb2e",
-  94: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc94of113.mp3?alt=media&token=1c02165d-0a44-49e2-b2a8-9bc920c22bd7",
-  95: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc95of113.mp3?alt=media&token=cc1ab153-0a3b-407f-8a4f-5705c5a84dbb",
-  96: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc96of113.mp3?alt=media&token=75982a86-df0b-42e7-a35a-4cebac43e441",
-  97: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc97of113.mp3?alt=media&token=b7fab4fa-cc31-4b4c-b444-383d3cd17e89",
-  98: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc98of113.mp3?alt=media&token=a00c15f1-14d6-4a1d-9d70-8f27f3b05aee",
-  99: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc99of113.mp3?alt=media&token=70e55194-501c-4e23-8a90-bd9ae55e0a1b",
-  100: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc100of113.mp3?alt=media&token=917c747d-26ec-4373-a713-0f7254324a9a",
-  101: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc101of113.mp3?alt=media&token=4e3ece39-ca1c-4a5c-9810-5554c03973c2",
-  102: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc102of113.mp3?alt=media&token=b34b59f0-4155-4bf1-a0c0-631d94ad1247",
-  103: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc103of113.mp3?alt=media&token=ed3bed82-ca7e-475e-b4d6-a717a786577a",
-  104: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc104of113.mp3?alt=media&token=84562861-802e-40d3-8f14-223e889d8dfa",
-  105: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc105of113.mp3?alt=media&token=82f6efd1-8768-4bbd-bb6b-b1cbd94e988a",
-  106: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc106of113.mp3?alt=media&token=257d5119-ef65-478d-923d-fbcccf654d78",
-  107: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc107of113.mp3?alt=media&token=f34c5690-5bf6-4645-9338-5727170881ad",
-  108: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc108of113.mp3?alt=media&token=c9b48835-9316-47ba-b303-f338480cf63d",
-  109: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc109of113.mp3?alt=media&token=665882b0-05e5-448a-8064-bc89501bb142",
-  110: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc110of113.mp3?alt=media&token=d1dc7188-9cd2-4699-8a79-509a35d7e1a5",
-  111: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc111of113.mp3?alt=media&token=2391dc78-da4e-4aaa-965c-46b7952e2cb1",
-  112: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc112of113.mp3?alt=media&token=a1c0adcf-6efd-4a8c-bd3f-8979290ba2ca",
-  113: "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F101bmc113of113.mp3?alt=media&token=23d88597-e324-405c-ba66-256ce758a88e",
-};
+export const FIREBASE_STORAGE_AUDIO_BASE_URL = "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F";
 
 /**
- * Retorna la URL directa oficial de audio para el capítulo solicitado
+ * Retorna la URL directa oficial de Firebase Storage para cualquier capítulo
  */
-export function getOfficialChapterAudioUrl(chapterNumber: number): string {
-  return OFFICIAL_AUDIO_URLS[chapterNumber] || "";
+export function getOfficialChapterAudioUrl(chapterNumber: number, filename?: string): string {
+  const actualFilename = filename || `101bmc${chapterNumber}of113.mp3`;
+  return `${FIREBASE_STORAGE_AUDIO_BASE_URL}${actualFilename}?alt=media`;
 }
+
+/**
+ * Diccionario precalculado de las 113 URLs directas de Firebase Storage
+ */
+export const OFFICIAL_AUDIO_URLS: Record<number, string> = Array.from({ length: 113 }, (_, i) => i + 1).reduce((acc, num) => {
+  acc[num] = getOfficialChapterAudioUrl(num);
+  return acc;
+}, {} as Record<number, string>);
