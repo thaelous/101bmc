@@ -30,7 +30,7 @@ import {
   getChapterAudioDownloadUrl,
   generateDefault113Tracks 
 } from '../firebase/config';
-import { getGoogleDriveDirectDownloadUrl } from '../data/googleDriveAudioMap';
+import { getOfficialChapterAudioUrl } from '../data/officialAudioUrls';
 import {
   isChapterOfflineAvailable,
   getAllOfflineChapterNumbers,
@@ -234,7 +234,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         }
 
         let resolvedUrl: string | null = null;
-        let onlineUrl: string | null = getGoogleDriveDirectDownloadUrl(currentTrack.chapterNumber) || currentTrack.audioUrl || null;
+        let onlineUrl: string | null = currentTrack.audioUrl || getOfficialChapterAudioUrl(currentTrack.chapterNumber) || null;
         if (!onlineUrl && navigator.onLine) {
           try {
             onlineUrl = await getChapterAudioDownloadUrl(currentTrack.chapterNumber, currentTrack.filename);
@@ -352,8 +352,8 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
       setIsLoadingAudioUrl(true);
       try {
         let url: string | null = null;
-        let onlineUrl: string | null = null;
-        if (navigator.onLine) {
+        let onlineUrl: string | null = currentTrack.audioUrl || getOfficialChapterAudioUrl(currentTrack.chapterNumber) || null;
+        if (!onlineUrl && navigator.onLine) {
           try {
             onlineUrl = await getChapterAudioDownloadUrl(currentTrack.chapterNumber, currentTrack.filename);
           } catch {}
@@ -407,13 +407,13 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
       setDownloadingChapterId(chapterNumber);
       setDownloadProgress(20);
 
-      const directUrl = getGoogleDriveDirectDownloadUrl(chapterNumber);
+      const audioUrl = currentTrack.audioUrl || getOfficialChapterAudioUrl(chapterNumber);
 
       const success = await saveChapterForOffline(
         chapterNumber,
         title,
         filename,
-        directUrl,
+        audioUrl,
         (pct) => {
           setDownloadProgress(pct);
         }
@@ -467,12 +467,12 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         } : null);
 
         try {
-          const directUrl = getGoogleDriveDirectDownloadUrl(track.chapterNumber) || track.audioUrl;
+          const audioUrl = track.audioUrl || getOfficialChapterAudioUrl(track.chapterNumber);
           const success = await saveChapterWithTimeout(
             track.chapterNumber,
             track.title,
             track.filename,
-            directUrl,
+            audioUrl,
             20000
           );
 

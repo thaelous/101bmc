@@ -12,7 +12,7 @@
 
 import { ref, getBlob, getBytes } from 'firebase/storage';
 import { storage, getChapterAudioDownloadUrl } from '../firebase/config';
-import { getGoogleDriveDirectDownloadUrl, getGoogleDriveFallbackUrls } from '../data/googleDriveAudioMap';
+import { getOfficialChapterAudioUrl } from '../data/officialAudioUrls';
 
 const DB_NAME = 'bmc_audios_db';
 const DB_VERSION = 1;
@@ -60,9 +60,8 @@ export interface AudioChapterRecord {
 }
 
 /**
- * Descarga el archivo de audio como Blob utilizando el enlace directo de Google Drive,
- * proxies de respaldo y Firebase Storage SDK, asegurando que sea un stream de audio real
- * y jamás una página de error o advertencia HTML.
+ * Descarga el archivo de audio como Blob utilizando las fuentes oficiales
+ * (Firebase Storage / Netlify), validando que sea audio real MP3.
  */
 export async function fetchAudioBlob(
   chapterNumber: number,
@@ -72,26 +71,23 @@ export async function fetchAudioBlob(
 ): Promise<Blob> {
   const actualFilename = filename || `101bmc${chapterNumber}of113.mp3`;
 
-  // 1. URLs candidatas ordenadas por prioridad
+  // 1. URLs candidatas oficiales
   const candidateUrls: string[] = [];
   if (audioUrl) {
     candidateUrls.push(audioUrl);
   }
 
-  const driveFallbacks = getGoogleDriveFallbackUrls(chapterNumber);
-  for (const u of driveFallbacks) {
-    if (!candidateUrls.includes(u)) {
-      candidateUrls.push(u);
-    }
+  const officialUrl = getOfficialChapterAudioUrl(chapterNumber);
+  if (officialUrl && !candidateUrls.includes(officialUrl)) {
+    candidateUrls.push(officialUrl);
   }
 
-  // 2. Probar cada URL candidata validando que sea audio real y no una vista HTML
+  // 2. Fetch directo con CORS a las fuentes oficiales
   for (const url of candidateUrls) {
     try {
       const resp = await fetch(url, { mode: 'cors', signal });
       if (resp.ok) {
         const contentType = (resp.headers.get('content-type') || '').toLowerCase();
-        // Descartar si el servidor devolvió una página HTML de advertencia o error
         if (!contentType.includes('text/html')) {
           const blob = await resp.blob();
           if (blob && blob.size > 20000) {
@@ -99,12 +95,10 @@ export async function fetchAudioBlob(
           }
         }
       }
-    } catch {
-      // Probar siguiente URL
-    }
+    } catch {}
   }
 
-  // 3. Respaldo Firebase Storage SDK si estuviese disponible
+  // 3. Respaldo directo en Firebase Storage SDK
   try {
     const storagePath = `audiolibro/${actualFilename}`;
     const storageRef = ref(storage, storagePath);
@@ -120,29 +114,19 @@ export async function fetchAudioBlob(
     }
   } catch {}
 
-  // 4. Proxies de respaldo adicionales
-  if (candidateUrls.length > 0) {
-    const primaryUrl = candidateUrls[0];
-    const proxyList = [
-      `https://corsproxy.io/?${encodeURIComponent(primaryUrl)}`,
-      `https://api.allorigins.win/raw?url=${encodeURIComponent(primaryUrl)}`
-    ];
-
-    for (const pUrl of proxyList) {
-      try {
-        const resp = await fetch(pUrl, { signal });
-        if (resp.ok) {
-          const contentType = (resp.headers.get('content-type') || '').toLowerCase();
-          if (!contentType.includes('text/html')) {
-            const blob = await resp.blob();
-            if (blob && blob.size > 20000) return blob;
-          }
-        }
-      } catch {}
-    }
+  // 4. Proxy de respaldo local si fuese necesario
+  for (const url of candidateUrls) {
+    try {
+      const proxyUrl = `/api/proxy-media?url=${encodeURIComponent(url)}`;
+      const resp = await fetch(proxyUrl, { signal });
+      if (resp.ok) {
+        const blob = await resp.blob();
+        if (blob && blob.size > 20000) return blob;
+      }
+    } catch {}
   }
 
-  throw new Error(`No se pudo extraer blob de audio válido para el capítulo ${chapterNumber}`);
+  throw new Error(`No se pudo extraer blob de audio para el capítulo ${chapterNumber}`);
 }
 
 /**
@@ -175,7 +159,7 @@ export async function saveChapterWithTimeout(
   }
 
   if (!realAudioUrl) {
-    realAudioUrl = getGoogleDriveDirectDownloadUrl(chapterNumber) || undefined;
+    realAudioUrl = getOfficialChapterAudioUrl(chapterNumber) || undefined;
   }
 
   try {
@@ -269,7 +253,7 @@ export async function isChapterOfflineAvailable(chapterNumber: number, audioUrl?
   if (typeof window !== 'undefined' && 'caches' in window) {
     try {
       const cache = await caches.open(CACHE_NAME);
-      const candidates = audioUrl ? [audioUrl] : getGoogleDriveFallbackUrls(chapterNumber);
+      const candidates = audioUrl ? [audioUrl] : [getOfficialChapterAudioUrl(chapterNumber)].filter(Boolean);
       for (const u of candidates) {
         const match = await cache.match(u);
         if (match) return true;
@@ -330,7 +314,7 @@ export async function getDecryptedChapterAudioUrl(chapterNumber: number, audioUr
     if (typeof window !== 'undefined' && 'caches' in window) {
       try {
         const cache = await caches.open(CACHE_NAME);
-        const candidates = audioUrl ? [audioUrl] : getGoogleDriveFallbackUrls(chapterNumber);
+        const candidates = audioUrl ? [audioUrl] : [getOfficialChapterAudioUrl(chapterNumber)].filter(Boolean);
         for (const u of candidates) {
           const match = await cache.match(u);
           if (match) {

@@ -163,10 +163,11 @@ export const OFFICIAL_113_CHAPTERS: OfficialChapterMetadata[] = Array.from({ len
   };
 });
 
-import { getGoogleDriveDirectDownloadUrl } from './googleDriveAudioMap';
+import { getOfficialChapterAudioUrl } from './officialAudioUrls';
 
 /**
  * Convierte los metadatos oficiales en el formato AudioTrackItem para la PWA
+ * con URLs directas de streaming oficial
  */
 export function getOfficialAudioTracks(): AudioTrackItem[] {
   return OFFICIAL_113_CHAPTERS.map(ch => ({
@@ -176,7 +177,7 @@ export function getOfficialAudioTracks(): AudioTrackItem[] {
     title: ch.title,
     subtitle: ch.subtitle,
     storagePath: `audiolibro/${ch.filename}`,
-    audioUrl: getGoogleDriveDirectDownloadUrl(ch.chapterNumber),
+    audioUrl: getOfficialChapterAudioUrl(ch.chapterNumber),
     durationSeconds: ch.durationSeconds
   }));
 }

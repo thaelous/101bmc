@@ -844,14 +844,14 @@ export async function fetchAudiolibroTracksFromStorage(): Promise<AudioTrackItem
   }
 }
 
-import { getGoogleDriveDirectDownloadUrl } from '../data/googleDriveAudioMap';
+import { getOfficialChapterAudioUrl } from '../data/officialAudioUrls';
 
 // Caché en memoria para URLs de audio ya obtenidas
 const audioUrlMemoryCache = new Map<number, string>();
 
 /**
- * Obtiene la URL de descarga o streaming directo del capítulo.
- * Prioriza el enlace directo de Google Drive y cuenta con respaldo en Firebase Storage.
+ * Obtiene la URL de descarga o streaming directo oficial del capítulo.
+ * Utiliza los enlaces directos oficiales con respaldo en Firebase Storage SDK.
  */
 export async function getChapterAudioDownloadUrl(
   chapterNumber: number, 
@@ -861,14 +861,14 @@ export async function getChapterAudioDownloadUrl(
     return audioUrlMemoryCache.get(chapterNumber)!;
   }
 
-  // 1. Enlace directo de Google Drive (Carpeta oficial 1zgAhCecB8cP2033kGK5NSnfw3h8ORenZ)
-  const gdriveUrl = getGoogleDriveDirectDownloadUrl(chapterNumber);
-  if (gdriveUrl) {
-    audioUrlMemoryCache.set(chapterNumber, gdriveUrl);
-    return gdriveUrl;
+  // 1. URL directa oficial de audio
+  const officialUrl = getOfficialChapterAudioUrl(chapterNumber);
+  if (officialUrl) {
+    audioUrlMemoryCache.set(chapterNumber, officialUrl);
+    return officialUrl;
   }
 
-  // 2. Respaldo en Firebase Storage
+  // 2. Respaldo directo en Firebase Storage SDK
   const filename = customFilename || `101bmc${chapterNumber}of113.mp3`;
   const storagePath = `audiolibro/${filename}`;
 
