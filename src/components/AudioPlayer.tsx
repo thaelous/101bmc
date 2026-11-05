@@ -30,6 +30,7 @@ import {
   getChapterAudioDownloadUrl,
   generateDefault113Tracks 
 } from '../firebase/config';
+import { getGoogleDriveDirectDownloadUrl } from '../data/googleDriveAudioMap';
 import {
   isChapterOfflineAvailable,
   getAllOfflineChapterNumbers,
@@ -233,8 +234,8 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         }
 
         let resolvedUrl: string | null = null;
-        let onlineUrl: string | null = null;
-        if (navigator.onLine) {
+        let onlineUrl: string | null = getGoogleDriveDirectDownloadUrl(currentTrack.chapterNumber) || currentTrack.audioUrl || null;
+        if (!onlineUrl && navigator.onLine) {
           try {
             onlineUrl = await getChapterAudioDownloadUrl(currentTrack.chapterNumber, currentTrack.filename);
           } catch {}
@@ -242,7 +243,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
 
         const isOffline = await isChapterOfflineAvailable(currentTrack.chapterNumber, onlineUrl || undefined);
 
-        // 1. Si está disponible en el almacén offline (IndexedDB o Cache API), obtener URL
+        // 1. Si está disponible en el almacén offline (IndexedDB o Cache API), reproducir desde blob local
         if (isOffline) {
           resolvedUrl = await getDecryptedChapterAudioUrl(currentTrack.chapterNumber, onlineUrl || undefined);
           if (resolvedUrl) {
@@ -250,7 +251,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
           }
         }
 
-        // 2. Si no estaba guardado offline, usar onlineUrl
+        // 2. Si no estaba guardado offline, usar onlineUrl para streaming directo
         if (!resolvedUrl && onlineUrl) {
           resolvedUrl = onlineUrl;
         }
@@ -404,24 +405,23 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const handleDownloadOffline = async (chapterNumber: number, title: string, filename: string) => {
     try {
       setDownloadingChapterId(chapterNumber);
-      setDownloadProgress(0);
+      setDownloadProgress(20);
 
-      let audioUrl: string | undefined = undefined;
-      try {
-        audioUrl = await getChapterAudioDownloadUrl(chapterNumber, filename);
-      } catch {}
+      const directUrl = getGoogleDriveDirectDownloadUrl(chapterNumber);
 
-      await saveChapterForOffline(
+      const success = await saveChapterForOffline(
         chapterNumber,
         title,
         filename,
-        audioUrl,
+        directUrl,
         (pct) => {
           setDownloadProgress(pct);
         }
       );
 
-      setOfflineChapterNumbers(prev => new Set([...prev, chapterNumber]));
+      if (success) {
+        setOfflineChapterNumbers(prev => new Set([...prev, chapterNumber]));
+      }
     } catch (err: any) {
       console.warn('[AudioPlayer] Error al guardar capítulo offline:', err);
       setAudioError('No se pudo guardar el capítulo para escuchar sin conexión.');
@@ -431,50 +431,76 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     }
   };
 
-  // Descarga masiva secuencial de los 113 capítulos de audio
+  // Descarga masiva en lotes controlados (2 archivos simultáneos) de los 113 capítulos
   const handleStartBulkDownload = async () => {
     setIsBulkDownloading(true);
     bulkCancelRef.current = false;
     const total = tracks.length;
 
-    for (let i = 0; i < total; i++) {
-      if (bulkCancelRef.current) {
-        break;
-      }
-
-      const track = tracks[i];
-      setBulkProgress({
-        current: i + 1,
-        total,
-        percent: Math.round(((i + 1) / total) * 100),
-        chapterTitle: track.title
-      });
-
-      // Si ya está guardado en IndexedDB, avanzar al siguiente
-      if (offlineChapterNumbers.has(track.chapterNumber)) {
-        continue;
-      }
-
-      try {
-        let audioUrl: string | undefined = undefined;
-        try {
-          audioUrl = await getChapterAudioDownloadUrl(track.chapterNumber, track.filename);
-        } catch {}
-
-        // Timeout estricto de máximo 8s por archivo sin congelar jamás la barra
-        await saveChapterWithTimeout(
-          track.chapterNumber,
-          track.title,
-          track.filename,
-          audioUrl,
-          8000
-        );
-
-        setOfflineChapterNumbers(prev => new Set([...prev, track.chapterNumber]));
-      } catch (err) {
-        console.warn(`[BulkDownload] Fallo controlado en capítulo ${track.chapterNumber}:`, err);
-      }
+    // Identificar qué pistas aún no están guardadas
+    const pendingTracks = tracks.filter(t => !offlineChapterNumbers.has(t.chapterNumber));
+    if (pendingTracks.length === 0) {
+      setIsBulkDownloading(false);
+      return;
     }
+
+    // Inicializar visualización del progreso
+    setBulkProgress({
+      current: offlineChapterNumbers.size,
+      total,
+      percent: Math.round((offlineChapterNumbers.size / total) * 100),
+      chapterTitle: pendingTracks[0].title
+    });
+
+    // Lotes pequeños controlados: máximo 2 descargas concurrentes para evitar saturación
+    const CONCURRENCY = 2;
+    let nextIndex = 0;
+
+    const worker = async () => {
+      while (nextIndex < pendingTracks.length && !bulkCancelRef.current) {
+        const track = pendingTracks[nextIndex++];
+        if (!track) break;
+
+        setBulkProgress(prev => prev ? {
+          ...prev,
+          chapterTitle: track.title
+        } : null);
+
+        try {
+          const directUrl = getGoogleDriveDirectDownloadUrl(track.chapterNumber) || track.audioUrl;
+          const success = await saveChapterWithTimeout(
+            track.chapterNumber,
+            track.title,
+            track.filename,
+            directUrl,
+            20000
+          );
+
+          if (success) {
+            // Actualizar de inmediato el estado del contador visual
+            setOfflineChapterNumbers(prev => {
+              const updated = new Set([...prev, track.chapterNumber]);
+              setBulkProgress({
+                current: updated.size,
+                total,
+                percent: Math.round((updated.size / total) * 100),
+                chapterTitle: track.title
+              });
+              return updated;
+            });
+          }
+        } catch (err) {
+          console.warn(`[BulkDownload] Fallo controlado en capítulo ${track.chapterNumber}:`, err);
+        }
+      }
+    };
+
+    const workers = Array.from(
+      { length: Math.min(CONCURRENCY, pendingTracks.length) },
+      () => worker()
+    );
+
+    await Promise.all(workers);
 
     setIsBulkDownloading(false);
     setBulkProgress(null);
@@ -829,10 +855,12 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             <div className="w-full p-2 rounded-xl bg-[#7c3aed]/10 border border-[#7c3aed]/25 flex flex-col gap-1 text-left">
               <div className="flex items-center justify-between text-[10px] font-bold text-[#7c3aed]">
                 <span className="flex items-center gap-1">
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                  <span>Guardando {bulkProgress.current} de {bulkProgress.total}...</span>
+                  <Loader2 className="w-3 h-3 animate-spin flex-shrink-0" />
+                  <span className="truncate">
+                    {bulkProgress.current} de {bulkProgress.total} capítulos guardados en el dispositivo
+                  </span>
                 </span>
-                <span>{bulkProgress.percent}%</span>
+                <span className="flex-shrink-0 ml-2">{bulkProgress.percent}%</span>
               </div>
               <div className="w-full bg-slate-200/80 rounded-full h-1.5 overflow-hidden">
                 <div 
@@ -844,18 +872,22 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
           ) : offlineChapterNumbers.size >= 113 ? (
             <div className="inline-flex items-center gap-1.5 text-emerald-700 text-[10px] font-bold">
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-              <span>113 Capítulos listos sin conexión</span>
+              <span>113 de 113 capítulos guardados en el dispositivo</span>
             </div>
           ) : (
             <div className="flex items-center justify-center gap-2">
               <button
                 type="button"
                 onClick={handleStartBulkDownload}
-                className="inline-flex items-center gap-1 px-3 py-1 rounded-xl bg-[#7c3aed]/10 hover:bg-[#7c3aed]/20 text-[#7c3aed] text-[10px] font-bold transition cursor-pointer active:scale-95"
-                title="Descargar todos los capítulos en el dispositivo"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#7c3aed]/10 hover:bg-[#7c3aed]/20 text-[#7c3aed] text-[10px] font-bold transition cursor-pointer active:scale-95"
+                title="Descargar todos los capítulos en el dispositivo para escuchar sin conexión"
               >
-                <Download className="w-3 h-3" />
-                <span>Descargar audios offline</span>
+                <Download className="w-3.5 h-3.5" />
+                <span>
+                  {offlineChapterNumbers.size > 0 
+                    ? `DESCARGAR RESTANTES (${offlineChapterNumbers.size} de 113 guardados)` 
+                    : 'DESCARGAR TODOS LOS CAPÍTULOS (MODO SIN CONEXIÓN)'}
+                </span>
               </button>
               {!offlineChapterNumbers.has(currentTrack.chapterNumber) && (
                 <button

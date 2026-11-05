@@ -12,6 +12,7 @@
 
 import { ref, getBlob, getBytes } from 'firebase/storage';
 import { storage, getChapterAudioDownloadUrl } from '../firebase/config';
+import { getGoogleDriveDirectDownloadUrl, getGoogleDriveFallbackUrls } from '../data/googleDriveAudioMap';
 
 const DB_NAME = 'bmc_audios_db';
 const DB_VERSION = 1;
@@ -59,8 +60,9 @@ export interface AudioChapterRecord {
 }
 
 /**
- * Descarga el archivo de audio como Blob utilizando fetch en modo 'cors', Firebase SDK
- * y proxies de respaldo confiables, respetando el AbortSignal para evitar colgar el proceso.
+ * Descarga el archivo de audio como Blob utilizando el enlace directo de Google Drive,
+ * proxies de respaldo y Firebase Storage SDK, asegurando que sea un stream de audio real
+ * y jamás una página de error o advertencia HTML.
  */
 export async function fetchAudioBlob(
   chapterNumber: number,
@@ -69,99 +71,97 @@ export async function fetchAudioBlob(
   signal?: AbortSignal
 ): Promise<Blob> {
   const actualFilename = filename || `101bmc${chapterNumber}of113.mp3`;
-  const storagePath = `audiolibro/${actualFilename}`;
 
-  // 1. fetch directo con mode: 'cors' usando la URL absoluta de Firebase Storage (óptimo para Netlify)
+  // 1. URLs candidatas ordenadas por prioridad
+  const candidateUrls: string[] = [];
   if (audioUrl) {
-    try {
-      const resp = await fetch(audioUrl, { mode: 'cors', signal });
-      if (resp.ok) {
-        const blob = await resp.blob();
-        if (blob && blob.size > 1000) return blob;
-      }
-    } catch {}
+    candidateUrls.push(audioUrl);
   }
 
-  // 2. Firebase Storage SDK: getBlob o getBytes directamente
+  const driveFallbacks = getGoogleDriveFallbackUrls(chapterNumber);
+  for (const u of driveFallbacks) {
+    if (!candidateUrls.includes(u)) {
+      candidateUrls.push(u);
+    }
+  }
+
+  // 2. Probar cada URL candidata validando que sea audio real y no una vista HTML
+  for (const url of candidateUrls) {
+    try {
+      const resp = await fetch(url, { mode: 'cors', signal });
+      if (resp.ok) {
+        const contentType = (resp.headers.get('content-type') || '').toLowerCase();
+        // Descartar si el servidor devolvió una página HTML de advertencia o error
+        if (!contentType.includes('text/html')) {
+          const blob = await resp.blob();
+          if (blob && blob.size > 20000) {
+            return blob;
+          }
+        }
+      }
+    } catch {
+      // Probar siguiente URL
+    }
+  }
+
+  // 3. Respaldo Firebase Storage SDK si estuviese disponible
   try {
+    const storagePath = `audiolibro/${actualFilename}`;
     const storageRef = ref(storage, storagePath);
     if (typeof window !== 'undefined' && typeof window.Blob !== 'undefined') {
       try {
         const blob = await getBlob(storageRef);
-        if (blob && blob.size > 1000) return blob;
+        if (blob && blob.size > 20000) return blob;
       } catch {}
     }
     const bytes = await getBytes(storageRef, 50 * 1024 * 1024);
-    if (bytes && bytes.byteLength > 1000) {
+    if (bytes && bytes.byteLength > 20000) {
       return new Blob([bytes], { type: 'audio/mpeg' });
     }
   } catch {}
 
-  // 3. Si no teníamos audioUrl, obtenerla ahora y probar fetch cors
-  if (!audioUrl) {
-    try {
-      const resolvedUrl = await getChapterAudioDownloadUrl(chapterNumber, actualFilename);
-      if (resolvedUrl) {
-        const resp = await fetch(resolvedUrl, { mode: 'cors', signal });
+  // 4. Proxies de respaldo adicionales
+  if (candidateUrls.length > 0) {
+    const primaryUrl = candidateUrls[0];
+    const proxyList = [
+      `https://corsproxy.io/?${encodeURIComponent(primaryUrl)}`,
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(primaryUrl)}`
+    ];
+
+    for (const pUrl of proxyList) {
+      try {
+        const resp = await fetch(pUrl, { signal });
         if (resp.ok) {
-          const blob = await resp.blob();
-          if (blob && blob.size > 1000) return blob;
+          const contentType = (resp.headers.get('content-type') || '').toLowerCase();
+          if (!contentType.includes('text/html')) {
+            const blob = await resp.blob();
+            if (blob && blob.size > 20000) return blob;
+          }
         }
-      }
-    } catch {}
+      } catch {}
+    }
   }
 
-  // 4. Proxies de respaldo si la conexión directa experimenta bloqueos
-  if (audioUrl) {
-    try {
-      const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(audioUrl)}`;
-      const proxyResp = await fetch(proxyUrl, { signal });
-      if (proxyResp.ok) {
-        const blob = await proxyResp.blob();
-        if (blob && blob.size > 1000) return blob;
-      }
-    } catch {}
-
-    try {
-      const allOriginsUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(audioUrl)}`;
-      const aoResp = await fetch(allOriginsUrl, { signal });
-      if (aoResp.ok) {
-        const blob = await aoResp.blob();
-        if (blob && blob.size > 1000) return blob;
-      }
-    } catch {}
-
-    try {
-      const localProxyUrl = `/api/proxy-media?url=${encodeURIComponent(audioUrl)}`;
-      const localResp = await fetch(localProxyUrl, { signal });
-      if (localResp.ok) {
-        const blob = await localResp.blob();
-        if (blob && blob.size > 1000) return blob;
-      }
-    } catch {}
-  }
-
-  throw new Error(`No se pudo extraer blob para el capítulo ${chapterNumber}`);
+  throw new Error(`No se pudo extraer blob de audio válido para el capítulo ${chapterNumber}`);
 }
 
 /**
- * Guarda un capítulo con un timeout estricto de máximo 8 segundos.
- * Soporta múltiples firmas de parámetros para evitar errores de llamada.
- * Utiliza fetch con mode: 'cors' y 'no-cors' con Cache API e IndexedDB sin bloquear la cola.
+ * Guarda un capítulo con un timeout estricto y seguro (por defecto 20 segundos).
+ * Convierte la respuesta en Blob y la almacena en IndexedDB ("bmc_audios_db") y Cache API.
+ * Retorna true ÚNICAMENTE cuando el archivo se ha almacenado exitosamente en el dispositivo.
  */
 export async function saveChapterWithTimeout(
   chapterNumber: number,
   titleOrUrl?: string,
   filename?: string,
   audioUrl?: string,
-  timeoutMs: number = 8000
+  timeoutMs: number = 20000
 ): Promise<boolean> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => {
     controller.abort();
   }, timeoutMs);
 
-  // Normalizar parámetros
   let realTitle = `Capítulo ${chapterNumber}`;
   let realFilename = filename || `101bmc${chapterNumber}of113.mp3`;
   let realAudioUrl = audioUrl;
@@ -174,67 +174,58 @@ export async function saveChapterWithTimeout(
     }
   }
 
+  if (!realAudioUrl) {
+    realAudioUrl = getGoogleDriveDirectDownloadUrl(chapterNumber) || undefined;
+  }
+
   try {
-    // Si no tenemos URL absoluta, resolverla de inmediato
-    if (!realAudioUrl) {
-      try {
-        realAudioUrl = await getChapterAudioDownloadUrl(chapterNumber, realFilename);
-      } catch {}
+    // 1. Descargar el Blob de audio real
+    const blob = await fetchAudioBlob(chapterNumber, realFilename, realAudioUrl, controller.signal);
+    if (!blob || blob.size < 20000) {
+      return false;
     }
 
-    // 1. Guardar en Cache API nativa con mode: 'cors' y fallback a 'no-cors'
+    // 2. Guardar en IndexedDB ("bmc_audios_db")
+    const db = await openAudiosDB();
+    const record: AudioChapterRecord = {
+      chapterNumber,
+      title: realTitle,
+      filename: realFilename,
+      blob,
+      sizeBytes: blob.size,
+      savedAt: Date.now()
+    };
+
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_AUDIOS, 'readwrite');
+      const store = tx.objectStore(STORE_AUDIOS);
+      const req = store.put(record);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+
+    // 3. Guardar también en Cache API nativa ("bmc-audios-v1") para doble resiliencia
     if (realAudioUrl && typeof window !== 'undefined' && 'caches' in window) {
       try {
         const cache = await caches.open(CACHE_NAME);
-        try {
-          const req = new Request(realAudioUrl, { mode: 'cors' });
-          const resp = await fetch(req, { signal: controller.signal });
-          if (resp && (resp.ok || resp.type === 'opaque')) {
-            await cache.put(req, resp);
+        const cachedResponse = new Response(blob, {
+          status: 200,
+          statusText: 'OK',
+          headers: {
+            'Content-Type': 'audio/mpeg',
+            'Content-Length': blob.size.toString(),
+            'Cache-Control': 'public, max-age=31536000, immutable'
           }
-        } catch {
-          const req = new Request(realAudioUrl, { mode: 'no-cors' });
-          const resp = await fetch(req, { signal: controller.signal });
-          if (resp) {
-            await cache.put(req, resp);
-          }
-        }
+        });
+        await cache.put(new Request(realAudioUrl), cachedResponse);
       } catch (cacheErr) {
         console.warn(`[AudioVault] Cache API aviso en cap ${chapterNumber}:`, cacheErr);
       }
     }
 
-    // 2. Extraer Blob para IndexedDB con el mismo AbortSignal de 8s
-    let blob: Blob | null = null;
-    try {
-      blob = await fetchAudioBlob(chapterNumber, realFilename, realAudioUrl, controller.signal);
-    } catch {}
-
-    if (blob) {
-      try {
-        const db = await openAudiosDB();
-        const record: AudioChapterRecord = {
-          chapterNumber,
-          title: realTitle,
-          filename: realFilename,
-          blob,
-          sizeBytes: blob.size,
-          savedAt: Date.now()
-        };
-
-        await new Promise<void>((resolve, reject) => {
-          const tx = db.transaction(STORE_AUDIOS, 'readwrite');
-          const store = tx.objectStore(STORE_AUDIOS);
-          const req = store.put(record);
-          req.onsuccess = () => resolve();
-          req.onerror = () => reject(req.error);
-        });
-      } catch {}
-    }
-
     return true;
   } catch (err) {
-    console.warn(`[AudioVault] Timeout o fallo en capítulo ${chapterNumber}:`, err);
+    console.warn(`[AudioVault] Error o timeout en capítulo ${chapterNumber}:`, err);
     return false;
   } finally {
     clearTimeout(timeoutId);
@@ -242,7 +233,7 @@ export async function saveChapterWithTimeout(
 }
 
 /**
- * Guarda un capítulo individual (usado por el botón individual)
+ * Guarda un capítulo individual (usado por el botón individual en la lista)
  */
 export async function saveChapterForOffline(
   chapterNumber: number,
@@ -250,10 +241,11 @@ export async function saveChapterForOffline(
   filename: string,
   audioUrl?: string,
   onProgress?: (pct: number) => void
-): Promise<void> {
+): Promise<boolean> {
   if (onProgress) onProgress(20);
-  await saveChapterWithTimeout(chapterNumber, title, filename, audioUrl, 8000);
+  const success = await saveChapterWithTimeout(chapterNumber, title, filename, audioUrl, 25000);
   if (onProgress) onProgress(100);
+  return success;
 }
 
 /**
@@ -274,11 +266,14 @@ export async function isChapterOfflineAvailable(chapterNumber: number, audioUrl?
   } catch {}
 
   // 2. Comprobar en Cache API nativa ('bmc-audios-v1')
-  if (audioUrl && typeof window !== 'undefined' && 'caches' in window) {
+  if (typeof window !== 'undefined' && 'caches' in window) {
     try {
       const cache = await caches.open(CACHE_NAME);
-      const match = await cache.match(audioUrl);
-      if (match) return true;
+      const candidates = audioUrl ? [audioUrl] : getGoogleDriveFallbackUrls(chapterNumber);
+      for (const u of candidates) {
+        const match = await cache.match(u);
+        if (match) return true;
+      }
     } catch {}
   }
 
@@ -286,32 +281,38 @@ export async function isChapterOfflineAvailable(chapterNumber: number, audioUrl?
 }
 
 /**
- * Obtiene el conjunto de números de capítulos guardados offline
+ * Obtiene el conjunto de números de capítulos guardados offline en el dispositivo
  */
 export async function getAllOfflineChapterNumbers(): Promise<Set<number>> {
+  const result = new Set<number>();
+
+  // 1. Desde IndexedDB
   try {
     const db = await openAudiosDB();
-    return new Promise((resolve) => {
+    const idbKeys = await new Promise<number[]>((resolve) => {
       const tx = db.transaction(STORE_AUDIOS, 'readonly');
       const store = tx.objectStore(STORE_AUDIOS);
       const req = store.getAllKeys();
 
       req.onsuccess = () => {
         const keys = (req.result as number[]) || [];
-        resolve(new Set<number>(keys));
+        resolve(keys);
       };
-      req.onerror = () => resolve(new Set<number>());
+      req.onerror = () => resolve([]);
     });
-  } catch {
-    return new Set<number>();
-  }
+
+    idbKeys.forEach(k => result.add(k));
+  } catch {}
+
+  return result;
 }
 
 /**
- * Obtiene la URL de reproducción desde IndexedDB o Cache API
+ * Obtiene la URL de reproducción desde IndexedDB (Blob URL) o Cache API
  */
 export async function getDecryptedChapterAudioUrl(chapterNumber: number, audioUrl?: string): Promise<string | null> {
   try {
+    // 1. Buscar en IndexedDB
     const db = await openAudiosDB();
     const record = await new Promise<AudioChapterRecord | null>((resolve) => {
       const tx = db.transaction(STORE_AUDIOS, 'readonly');
@@ -325,17 +326,19 @@ export async function getDecryptedChapterAudioUrl(chapterNumber: number, audioUr
       return URL.createObjectURL(record.blob);
     }
 
-    // Si no está en IndexedDB, buscar en Cache API
-    if (audioUrl && typeof window !== 'undefined' && 'caches' in window) {
+    // 2. Si no está en IndexedDB, buscar en Cache API
+    if (typeof window !== 'undefined' && 'caches' in window) {
       try {
         const cache = await caches.open(CACHE_NAME);
-        const match = await cache.match(audioUrl);
-        if (match) {
-          const blob = await match.blob();
-          if (blob && blob.size > 0) {
-            return URL.createObjectURL(blob);
+        const candidates = audioUrl ? [audioUrl] : getGoogleDriveFallbackUrls(chapterNumber);
+        for (const u of candidates) {
+          const match = await cache.match(u);
+          if (match) {
+            const blob = await match.blob();
+            if (blob && blob.size > 20000) {
+              return URL.createObjectURL(blob);
+            }
           }
-          return audioUrl;
         }
       } catch {}
     }

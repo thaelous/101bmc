@@ -844,11 +844,14 @@ export async function fetchAudiolibroTracksFromStorage(): Promise<AudioTrackItem
   }
 }
 
-// Caché en memoria para URLs de audio ya obtenidas con getDownloadURL
+import { getGoogleDriveDirectDownloadUrl } from '../data/googleDriveAudioMap';
+
+// Caché en memoria para URLs de audio ya obtenidas
 const audioUrlMemoryCache = new Map<number, string>();
 
 /**
- * Obtiene la URL de descarga segura del capítulo usando getDownloadURL()
+ * Obtiene la URL de descarga o streaming directo del capítulo.
+ * Prioriza el enlace directo de Google Drive y cuenta con respaldo en Firebase Storage.
  */
 export async function getChapterAudioDownloadUrl(
   chapterNumber: number, 
@@ -858,6 +861,14 @@ export async function getChapterAudioDownloadUrl(
     return audioUrlMemoryCache.get(chapterNumber)!;
   }
 
+  // 1. Enlace directo de Google Drive (Carpeta oficial 1zgAhCecB8cP2033kGK5NSnfw3h8ORenZ)
+  const gdriveUrl = getGoogleDriveDirectDownloadUrl(chapterNumber);
+  if (gdriveUrl) {
+    audioUrlMemoryCache.set(chapterNumber, gdriveUrl);
+    return gdriveUrl;
+  }
+
+  // 2. Respaldo en Firebase Storage
   const filename = customFilename || `101bmc${chapterNumber}of113.mp3`;
   const storagePath = `audiolibro/${filename}`;
 
@@ -869,10 +880,9 @@ export async function getChapterAudioDownloadUrl(
     }
   } catch (err: any) {
     console.warn(`[Firebase Storage] Error en getDownloadURL para ${storagePath}:`, err?.message || err);
-    throw err;
   }
 
-  throw new Error(`No se pudo obtener URL segura mediante getDownloadURL para ${storagePath}`);
+  throw new Error(`No se pudo obtener URL para el capítulo ${chapterNumber}`);
 }
 
 // ============================================================================
