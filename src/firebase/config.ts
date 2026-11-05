@@ -858,6 +858,30 @@ export async function getChapterAudioDownloadUrl(
   return getOfficialChapterAudioUrl(chapterNumber, filename);
 }
 
+/**
+ * Obtiene la URL pública firmada de Firebase Storage que incluye token de descarga (&token=...)
+ * para cuando un dominio personalizado (como libromc.buenosmalosconsejos.com) requiere token explícito.
+ */
+export async function getChapterSignedStorageUrl(
+  chapterNumber: number,
+  customFilename?: string
+): Promise<string> {
+  const filename = customFilename || `101bmc${chapterNumber}of113.mp3`;
+  try {
+    const storagePath = `audiolibro/${filename}`;
+    const storageRef = ref(storage, storagePath);
+    const signedUrl = await getDownloadURL(storageRef);
+    if (signedUrl) {
+      return signedUrl;
+    }
+    return getOfficialChapterAudioUrl(chapterNumber, filename);
+  } catch (err) {
+    console.warn(`[Storage] getChapterSignedStorageUrl fallback a URL base para cap ${chapterNumber}:`, err);
+    return getOfficialChapterAudioUrl(chapterNumber, filename);
+  }
+}
+
+
 // ============================================================================
 // LIBRO DIGITAL EPUB: CARGA LOCAL DIRECTA DESDE LA CARPETA PUBLIC
 // ============================================================================

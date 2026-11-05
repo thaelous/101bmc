@@ -2,11 +2,20 @@
   publish = "dist"
   command = "npm run build"
 
+# Audio streaming proxy to eliminate CORS on custom domains (e.g. libromc.buenosmalosconsejos.com)
+[[redirects]]
+  from = "/storage-audio/*"
+  to = "https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F:splat?alt=media"
+  status = 200
+  force = true
+  headers = { Access-Control-Allow-Origin = "*" }
+
 # SPA redirect for React single-page app
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
+
 
 # CORS headers for media assets, EPUB and audio streaming
 [[headers]]

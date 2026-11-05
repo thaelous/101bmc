@@ -11,8 +11,9 @@
  */
 
 import { ref, getBlob, getBytes } from 'firebase/storage';
-import { storage, getChapterAudioDownloadUrl } from '../firebase/config';
-import { getOfficialChapterAudioUrl } from '../data/officialAudioUrls';
+import { storage, getChapterAudioDownloadUrl, getChapterSignedStorageUrl } from '../firebase/config';
+import { getOfficialChapterAudioUrl, getSameOriginAudioUrl } from '../data/officialAudioUrls';
+
 
 const DB_NAME = 'bmc_audios_db';
 const DB_VERSION = 1;
@@ -71,21 +72,26 @@ export async function fetchAudioBlob(
 ): Promise<Blob> {
   const actualFilename = filename || `101bmc${chapterNumber}of113.mp3`;
 
-  // 1. URLs candidatas oficiales
+  // 1. URLs candidatas oficiales (incluyendo URL de mismo origen para evitar CORS)
   const candidateUrls: string[] = [];
-  if (audioUrl) {
+  
+  // Opción misma procedencia (sin restricciones de CORS en subdominios personalizados)
+  const sameOriginUrl = getSameOriginAudioUrl(chapterNumber, actualFilename);
+  candidateUrls.push(sameOriginUrl);
+
+  if (audioUrl && !candidateUrls.includes(audioUrl)) {
     candidateUrls.push(audioUrl);
   }
 
-  const officialUrl = getOfficialChapterAudioUrl(chapterNumber);
+  const officialUrl = getOfficialChapterAudioUrl(chapterNumber, actualFilename);
   if (officialUrl && !candidateUrls.includes(officialUrl)) {
     candidateUrls.push(officialUrl);
   }
 
-  // 2. Fetch directo con CORS a las fuentes oficiales
+  // 2. Probar fetch con URLs candidatas
   for (const url of candidateUrls) {
     try {
-      const resp = await fetch(url, { mode: 'cors', signal });
+      const resp = await fetch(url, { signal });
       if (resp.ok) {
         const contentType = (resp.headers.get('content-type') || '').toLowerCase();
         if (!contentType.includes('text/html')) {
@@ -98,7 +104,22 @@ export async function fetchAudioBlob(
     } catch {}
   }
 
-  // 3. Respaldo directo en Firebase Storage SDK
+  // 3. Obtener URL pública firmada de Firebase Storage con token (&token=...)
+  try {
+    const signedUrl = await getChapterSignedStorageUrl(chapterNumber, actualFilename);
+    if (signedUrl && !candidateUrls.includes(signedUrl)) {
+      const resp = await fetch(signedUrl, { signal });
+      if (resp.ok) {
+        const contentType = (resp.headers.get('content-type') || '').toLowerCase();
+        if (!contentType.includes('text/html')) {
+          const blob = await resp.blob();
+          if (blob && blob.size > 20000) return blob;
+        }
+      }
+    }
+  } catch {}
+
+  // 4. Respaldo directo en Firebase Storage SDK (comunicación directa con la API de Firebase)
   try {
     const storagePath = `audiolibro/${actualFilename}`;
     const storageRef = ref(storage, storagePath);
@@ -114,7 +135,7 @@ export async function fetchAudioBlob(
     }
   } catch {}
 
-  // 4. Proxy de respaldo local si fuese necesario
+  // 5. Proxy de respaldo local si fuese necesario
   for (const url of candidateUrls) {
     try {
       const proxyUrl = `/api/proxy-media?url=${encodeURIComponent(url)}`;
@@ -128,6 +149,7 @@ export async function fetchAudioBlob(
 
   throw new Error(`No se pudo extraer blob de audio para el capítulo ${chapterNumber}`);
 }
+
 
 /**
  * Guarda un capítulo con un timeout estricto y seguro (por defecto 20 segundos).

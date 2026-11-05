@@ -8,6 +8,26 @@ function mediaProxyPlugin() {
   return {
     name: 'media-proxy-plugin',
     configureServer(server: any) {
+      server.middlewares.use('/storage-audio', async (req: any, res: any) => {
+        try {
+          const filename = req.url.replace(/^\//, '').split('?')[0];
+          const targetUrl = `https://firebasestorage.googleapis.com/v0/b/libros-1f750.firebasestorage.app/o/audiolibro%2F${filename}?alt=media`;
+          const response = await fetch(targetUrl);
+          if (!response.ok) {
+            res.statusCode = response.status;
+            res.end(`Firebase Storage fetch failed with status ${response.status}`);
+            return;
+          }
+          res.setHeader('Content-Type', 'audio/mpeg');
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          const arrayBuffer = await response.arrayBuffer();
+          res.end(Buffer.from(arrayBuffer));
+        } catch (err: any) {
+          res.statusCode = 500;
+          res.end(err.message || 'Error proxying audio');
+        }
+      });
+
       server.middlewares.use('/api/proxy-media', async (req: any, res: any) => {
         try {
           const urlObj = new URL(req.url, 'http://localhost:3000');
@@ -33,6 +53,7 @@ function mediaProxyPlugin() {
           res.end(err.message || 'Error fetching media');
         }
       });
+
     }
   };
 }

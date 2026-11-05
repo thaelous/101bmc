@@ -42,16 +42,21 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // EXCLUSIÓN CRÍTICA: No interceptar archivos PDF, Range requests ni archivos de gran tamaño
-  // Esto permite que el navegador y PDF.js manejen peticiones Range 206 directamente sin error 500
+  // EXCLUSIÓN CRÍTICA: No interceptar archivos PDF, audios MP3, Firebase Storage, proxy ni Range requests
+  // Esto permite que el navegador maneje peticiones Range 206 y streaming de audio sin interferencias ni bloqueos CORS en dominios personalizados
   if (
     event.request.url.includes('.pdf') ||
+    event.request.url.includes('.mp3') ||
+    event.request.url.includes('firebasestorage.googleapis.com') ||
+    event.request.url.includes('audiolibro') ||
+    event.request.url.includes('storage-audio') ||
     event.request.url.includes('101BMC') ||
     event.request.url.includes('libro-movil') ||
     event.request.headers.get('range')
   ) {
     return;
   }
+
 
   // Network-first for Firestore and API, Cache-first for static fonts and lightweight images
   const isStatic = event.request.url.includes('/fonts.') ||

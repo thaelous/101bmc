@@ -28,17 +28,20 @@ import { Chapter, AudioTrackItem } from '../types';
 import { 
   fetchAudiolibroTracksFromStorage, 
   getChapterAudioDownloadUrl,
+  getChapterSignedStorageUrl,
   generateDefault113Tracks 
 } from '../firebase/config';
-import { getOfficialChapterAudioUrl } from '../data/officialAudioUrls';
+import { getOfficialChapterAudioUrl, getSameOriginAudioUrl } from '../data/officialAudioUrls';
 import {
   isChapterOfflineAvailable,
   getAllOfflineChapterNumbers,
   saveChapterForOffline,
   saveChapterWithTimeout,
   getDecryptedChapterAudioUrl,
-  deleteOfflineChapter
+  deleteOfflineChapter,
+  fetchAudioBlob
 } from '../services/offlineAudioVault';
+
 
 interface AudioPlayerProps {
   chapters?: Chapter[];

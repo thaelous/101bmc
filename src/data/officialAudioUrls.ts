@@ -11,10 +11,22 @@ export const FIREBASE_STORAGE_AUDIO_BASE_URL = "https://firebasestorage.googleap
 
 /**
  * Retorna la URL directa oficial de Firebase Storage para cualquier capítulo
+ * con el parámetro de acceso público ?alt=media garantizado de forma limpia.
  */
 export function getOfficialChapterAudioUrl(chapterNumber: number, filename?: string): string {
-  const actualFilename = filename || `101bmc${chapterNumber}of113.mp3`;
-  return `${FIREBASE_STORAGE_AUDIO_BASE_URL}${actualFilename}?alt=media`;
+  const actualFilename = (filename || `101bmc${chapterNumber}of113.mp3`).trim();
+  const cleanFilename = actualFilename.replace(/^.*[\\/]/, '');
+  return `${FIREBASE_STORAGE_AUDIO_BASE_URL}${cleanFilename}?alt=media`;
+}
+
+/**
+ * Retorna la URL de proxy con el mismo origen (/storage-audio/{filename})
+ * que resuelve a través de Netlify CDN eliminando cualquier restricción CORS en dominios personalizados.
+ */
+export function getSameOriginAudioUrl(chapterNumber: number, filename?: string): string {
+  const actualFilename = (filename || `101bmc${chapterNumber}of113.mp3`).trim();
+  const cleanFilename = actualFilename.replace(/^.*[\\/]/, '');
+  return `/storage-audio/${cleanFilename}`;
 }
 
 /**
@@ -24,3 +36,4 @@ export const OFFICIAL_AUDIO_URLS: Record<number, string> = Array.from({ length: 
   acc[num] = getOfficialChapterAudioUrl(num);
   return acc;
 }, {} as Record<number, string>);
+
