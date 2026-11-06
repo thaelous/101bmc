@@ -163,10 +163,14 @@ export const BookReader: React.FC<BookReaderProps> = ({
     return () => {
       isMounted = false;
       try {
+        currentRenderTaskRef.current?.cancel();
+      } catch {}
+      try {
         activeTask?.destroy?.();
       } catch {}
     };
   }, []);
+
 
   // Función para renderizar la página en el canvas de forma secuencial y segura
   const renderCurrentPage = useCallback(async () => {
@@ -681,14 +685,10 @@ export const BookReader: React.FC<BookReaderProps> = ({
               max={totalPages}
               value={pageInputValue}
               onChange={(e) => setPageInputValue(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  handlePageJump();
-                }
-              }}
               className="w-12 sm:w-14 text-center font-bold text-xs sm:text-sm text-neutral-900 bg-neutral-100 border border-neutral-300 rounded-xl py-1 px-1 focus:outline-none focus:ring-2 focus:ring-[#7c3aed] shadow-inner"
               placeholder="1"
               title="Escribe el número de página y presiona Enter o Ir"
+
             />
             <button
               type="submit"

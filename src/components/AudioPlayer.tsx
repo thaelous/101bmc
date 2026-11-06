@@ -128,15 +128,22 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     };
   }, []);
 
-  // Limpiar blob URL al desmontar componente
+  // Limpiar elemento de audio y blob URL al desmontar componente
   useEffect(() => {
     return () => {
+      if (audioRef.current) {
+        try {
+          audioRef.current.pause();
+          audioRef.current.src = '';
+        } catch {}
+      }
       if (activeBlobUrlRef.current) {
         URL.revokeObjectURL(activeBlobUrlRef.current);
         activeBlobUrlRef.current = null;
       }
     };
   }, []);
+
 
   // Cargar lista dinámica desde Firebase Storage al iniciar y combinar con títulos de Robert Pacheco
   useEffect(() => {

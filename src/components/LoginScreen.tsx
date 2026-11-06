@@ -31,10 +31,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   onDirectCodeAccess 
 }) => {
   const [accessCode, setAccessCode] = useState('');
-  const [email, setEmail] = useState(() => {
-    return localStorage.getItem('101_user_email') || '';
-  });
+  const [email, setEmail] = useState('');
   const [connectedUser, setConnectedUser] = useState<UserProfile | null>(null);
+
 
   const [isCheckingCode, setIsCheckingCode] = useState(false);
   const [isCheckingDirectEmail, setIsCheckingDirectEmail] = useState(false);
@@ -393,7 +392,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
               </div>
 
               {/* Formulario de Código de Acceso */}
-              <form onSubmit={handleUnlockWithCode} className="space-y-3 mb-2 text-left">
+              <form onSubmit={handleUnlockWithCode} autoComplete="off" className="space-y-3 mb-2 text-left">
                 {/* Campo 1: Tu correo electrónico para registrar la licencia */}
                 <div>
                   <div className="flex items-center justify-between mb-1">
@@ -408,15 +407,21 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                   </div>
                   <input
                     type="email"
+                    name="email"
                     value={email}
                     onChange={(e) => {
                       setEmail(e.target.value);
                       setCodeError(null);
                     }}
                     placeholder="tu-correo@gmail.com"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
                     disabled={isCheckingCode || isLoggingIn || isCheckingDirectEmail}
                     className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border-2 border-slate-200 focus:border-[#7c3aed] focus:bg-white focus:outline-none text-xs sm:text-sm font-medium text-[#0f2147] placeholder:text-slate-400 transition"
                   />
+
 
                   {/* Botón secundario limpio: Ya canjeé mi código (Entrar directo) */}
                   <button
@@ -447,15 +452,21 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                   <div className="relative">
                     <input
                       type="text"
+                      name="access_code"
                       value={accessCode}
                       onChange={(e) => {
                         setAccessCode(e.target.value.toUpperCase());
                         setCodeError(null);
                       }}
                       placeholder="EJ: CONSEJO-101-GOLD"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="characters"
+                      spellCheck={false}
                       disabled={isCheckingCode || isLoggingIn}
                       className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border-2 border-slate-200 focus:border-[#7c3aed] focus:bg-white focus:outline-none text-center font-mono font-bold text-xs sm:text-sm tracking-wider uppercase text-[#0f2147] placeholder:text-slate-400 transition"
                     />
+
                     {accessCode && (
                       <button
                         type="button"
