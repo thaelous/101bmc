@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+
 import { 
   Play, 
   Pause, 
@@ -92,6 +93,8 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const activeBlobUrlRef = useRef<string | null>(null);
   const timerIntervalRef = useRef<any>(null);
+  const fallbackRetryMapRef = useRef<Record<number, number>>({});
+
 
   // Escuchar cambios de conectividad (Online / Offline)
   useEffect(() => {
@@ -169,6 +172,94 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     }
   }, [currentChapterIndex, tracks.length]);
 
+  // Mecanismo de recuperación progresiva (Fallback) ante bloqueos CORS o errores en dominios personalizados
+  const attemptFallbackPlayback = useCallback(async (reason?: string): Promise<boolean> => {
+    if (!audioRef.current) return false;
+    const chapterNum = currentTrack.chapterNumber;
+    const currentAttempt = fallbackRetryMapRef.current[chapterNum] || 0;
+
+    console.info(`[AudioPlayer] Fallback de audio activado para cap ${chapterNum} (intento ${currentAttempt + 1}, motivo: ${reason || 'error'})`);
+
+    // 1. Respaldo directo si el archivo ya fue descargado a caché o IndexedDB (URL.createObjectURL)
+    if (currentAttempt === 0) {
+      fallbackRetryMapRef.current[chapterNum] = 1;
+      try {
+        const localBlobUrl = await getDecryptedChapterAudioUrl(chapterNum, currentTrack.audioUrl);
+        if (localBlobUrl && audioRef.current) {
+          if (activeBlobUrlRef.current) URL.revokeObjectURL(activeBlobUrlRef.current);
+          activeBlobUrlRef.current = localBlobUrl;
+          audioRef.current.src = localBlobUrl;
+          await audioRef.current.play();
+          setIsPlaying(true);
+          setAudioError(null);
+          setIsLoadingAudioUrl(false);
+          return true;
+        }
+      } catch (err) {
+        console.warn('[AudioPlayer] Fallback 1 (local blob en caché) no disponible:', err);
+      }
+    }
+
+    // 2. Reintento directo con la URL pública firmada de Storage (&token=...)
+    if (currentAttempt <= 1) {
+      fallbackRetryMapRef.current[chapterNum] = 2;
+      try {
+        const signedUrl = await getChapterSignedStorageUrl(chapterNum, currentTrack.filename);
+        if (signedUrl && audioRef.current && signedUrl !== audioRef.current.src) {
+          audioRef.current.src = signedUrl;
+          await audioRef.current.play();
+          setIsPlaying(true);
+          setAudioError(null);
+          setIsLoadingAudioUrl(false);
+          return true;
+        }
+      } catch (err) {
+        console.warn('[AudioPlayer] Fallback 2 (URL firmada de Storage con token) falló:', err);
+      }
+    }
+
+    // 3. Reintento con la ruta relativa del mismo origen (/storage-audio/{filename}) servida por Netlify CDN
+    if (currentAttempt <= 2) {
+      fallbackRetryMapRef.current[chapterNum] = 3;
+      try {
+        const sameOriginUrl = getSameOriginAudioUrl(chapterNum, currentTrack.filename);
+        if (audioRef.current && audioRef.current.src !== window.location.origin + sameOriginUrl) {
+          audioRef.current.src = sameOriginUrl;
+          await audioRef.current.play();
+          setIsPlaying(true);
+          setAudioError(null);
+          setIsLoadingAudioUrl(false);
+          return true;
+        }
+      } catch (err) {
+        console.warn('[AudioPlayer] Fallback 3 (proxy mismo origen) falló:', err);
+      }
+    }
+
+    // 4. Descarga binaria con Firebase Storage SDK y conversión a URL.createObjectURL (100% inmune a CORS)
+    if (currentAttempt <= 3) {
+      fallbackRetryMapRef.current[chapterNum] = 4;
+      try {
+        const blob = await fetchAudioBlob(chapterNum, currentTrack.filename, currentTrack.audioUrl);
+        if (blob && blob.size > 20000 && audioRef.current) {
+          const blobUrl = URL.createObjectURL(blob);
+          if (activeBlobUrlRef.current) URL.revokeObjectURL(activeBlobUrlRef.current);
+          activeBlobUrlRef.current = blobUrl;
+          audioRef.current.src = blobUrl;
+          await audioRef.current.play();
+          setIsPlaying(true);
+          setAudioError(null);
+          setIsLoadingAudioUrl(false);
+          return true;
+        }
+      } catch (err) {
+        console.warn('[AudioPlayer] Fallback 4 (extracción directa Blob) falló:', err);
+      }
+    }
+
+    return false;
+  }, [currentTrack.chapterNumber, currentTrack.filename, currentTrack.audioUrl]);
+
   // Inicializar elemento de audio y suscribir eventos nativos de HTML5 Audio
   useEffect(() => {
     if (!audioRef.current) {
@@ -201,11 +292,14 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
       handleNextTrack();
     };
 
-    const handleError = () => {
-      console.warn(`[AudioPlayer] No se pudo reproducir audio de ${currentTrack.filename}`);
-      setIsLoadingAudioUrl(false);
-      setIsPlaying(false);
-      setAudioError('No se pudo reproducir el audio del capítulo. Comprueba tu conexión a internet.');
+    const handleError = async () => {
+      console.warn(`[AudioPlayer] Error o CORS al reproducir audio de ${currentTrack.filename}`);
+      const recovered = await attemptFallbackPlayback('html5-audio-error');
+      if (!recovered) {
+        setIsLoadingAudioUrl(false);
+        setIsPlaying(false);
+        setAudioError('No se pudo reproducir el audio del capítulo. Comprueba tu conexión a internet.');
+      }
     };
 
     audio.addEventListener('loadedmetadata', handleLoadedMetadata);
@@ -219,7 +313,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
       audio.removeEventListener('ended', handleEnded);
       audio.removeEventListener('error', handleError);
     };
-  }, [activeTrackIndex, sleepTimerMinutes, currentTrack]);
+  }, [activeTrackIndex, sleepTimerMinutes, currentTrack, attemptFallbackPlayback]);
 
   // Cargar URL del capítulo: si está offline descifra el blob de IndexedDB, si está online transmite desde Firebase Storage
   useEffect(() => {
@@ -227,6 +321,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     setIsLoadingAudioUrl(true);
     setAudioError(null);
     setCurrentTime(0);
+    fallbackRetryMapRef.current[currentTrack.chapterNumber] = 0;
 
     const loadChapterAudio = async () => {
       try {
@@ -272,10 +367,13 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
                   setAudioError(null);
                 }
               })
-              .catch((err) => {
-                console.warn('[AudioPlayer] Autoplay suspendido o bloqueado por el navegador:', err);
+              .catch(async (err) => {
+                console.warn('[AudioPlayer] Autoplay suspendido o bloqueado, intentando fallback:', err);
                 if (!isCancelled) {
-                  setIsPlaying(false);
+                  const recovered = await attemptFallbackPlayback('autoplay-blocked');
+                  if (!recovered) {
+                    setIsPlaying(false);
+                  }
                 }
               });
           }
@@ -304,7 +402,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     return () => {
       isCancelled = true;
     };
-  }, [activeTrackIndex, currentTrack.chapterNumber, currentTrack.filename]);
+  }, [activeTrackIndex, currentTrack.chapterNumber, currentTrack.filename, attemptFallbackPlayback]);
 
   // Manejo del temporizador de apagado
   useEffect(() => {
@@ -368,15 +466,26 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
           audioRef.current.src = url;
           audioRef.current.playbackRate = playbackRate;
           audioRef.current.volume = isMuted ? 0 : volume;
-          await audioRef.current.play();
-          setIsPlaying(true);
-          setAudioError(null);
+          try {
+            await audioRef.current.play();
+            setIsPlaying(true);
+            setAudioError(null);
+          } catch (playErr) {
+            console.warn('[AudioPlayer] Error en play(), ejecutando fallback:', playErr);
+            const recovered = await attemptFallbackPlayback('play-init-error');
+            if (!recovered) {
+              setAudioError('Haz clic en Reproducir para activar el sonido.');
+            }
+          }
         } else {
           setAudioError(!navigator.onLine ? 'Sin conexión a internet. Guarda el capítulo para reproducir offline.' : 'No se pudo encontrar el audio del capítulo actual.');
         }
       } catch (err: any) {
         console.warn('[AudioPlayer] Error al reproducir audio mediante getDownloadURL():', err);
-        setAudioError('No se pudo cargar el audio. Por favor, intenta de nuevo.');
+        const recovered = await attemptFallbackPlayback('play-exception');
+        if (!recovered) {
+          setAudioError('No se pudo cargar el audio. Por favor, intenta de nuevo.');
+        }
       } finally {
         setIsLoadingAudioUrl(false);
       }
@@ -386,12 +495,17 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     try {
       await audioRef.current.play();
       setIsPlaying(true);
+      setAudioError(null);
     } catch (err) {
-      console.warn('[AudioPlayer] Error al reanudar audio:', err);
-      setIsPlaying(false);
-      setAudioError('Haz clic en Reproducir para activar el sonido.');
+      console.warn('[AudioPlayer] Error al reanudar audio, ejecutando fallback:', err);
+      const recovered = await attemptFallbackPlayback('resume-error');
+      if (!recovered) {
+        setIsPlaying(false);
+        setAudioError('Haz clic en Reproducir para activar el sonido.');
+      }
     }
   };
+
 
   const handleDownloadOffline = async (chapterNumber: number, title: string, filename: string) => {
     try {
