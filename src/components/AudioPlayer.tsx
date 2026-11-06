@@ -95,6 +95,11 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const timerIntervalRef = useRef<any>(null);
   const fallbackRetryMapRef = useRef<Record<number, number>>({});
 
+  // Nodos de Web Audio API para normalización de volumen y compresión dinámica
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const mediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const compressorRef = useRef<DynamicsCompressorNode | null>(null);
+  const gainNodeRef = useRef<GainNode | null>(null);
 
   // Escuchar cambios de conectividad (Online / Offline)
   useEffect(() => {
@@ -128,7 +133,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     };
   }, []);
 
-  // Limpiar elemento de audio y blob URL al desmontar componente
+  // Limpiar elemento de audio, audio context y blob URL al desmontar componente
   useEffect(() => {
     return () => {
       if (audioRef.current) {
@@ -137,12 +142,18 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
           audioRef.current.src = '';
         } catch {}
       }
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        try {
+          audioContextRef.current.close();
+        } catch {}
+      }
       if (activeBlobUrlRef.current) {
         URL.revokeObjectURL(activeBlobUrlRef.current);
         activeBlobUrlRef.current = null;
       }
     };
   }, []);
+
 
 
   // Cargar lista dinámica desde Firebase Storage al iniciar y combinar con títulos de Robert Pacheco
@@ -179,8 +190,72 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     }
   }, [currentChapterIndex, tracks.length]);
 
+  // Sincronizar ganancia de Web Audio con el volumen y estado de muteo del usuario
+
+  useEffect(() => {
+    if (gainNodeRef.current && audioContextRef.current) {
+      const effectiveGain = isMuted ? 0 : volume * 1.5;
+      gainNodeRef.current.gain.setValueAtTime(effectiveGain, audioContextRef.current.currentTime);
+    }
+  }, [volume, isMuted]);
+
+  // Inicialización y desbloqueo seguro de la Web Audio API ante interacción del usuario
+  const ensureWebAudioInitialized = useCallback(async () => {
+    try {
+      if (!audioContextRef.current && typeof window !== 'undefined') {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtx) {
+          audioContextRef.current = new AudioCtx();
+        }
+      }
+
+      const ctx = audioContextRef.current;
+      if (!ctx) return;
+
+      // Desbloqueo de AudioContext para cumplir con las políticas de autoplay de Chrome/Safari
+      if (ctx.state === 'suspended') {
+        await ctx.resume();
+      }
+
+      // Conectar el elemento HTML5 Audio solo una vez a la cadena de compresión y ganancia
+      if (audioRef.current && !mediaSourceRef.current) {
+        const source = ctx.createMediaElementSource(audioRef.current);
+        mediaSourceRef.current = source;
+
+        // 1. Nodo de compresión dinámica optimizado para audiolibros y voz humana
+        const compressor = ctx.createDynamicsCompressor();
+        // Umbral alto / moderado (-24 dB): procesa y contiene picos de volumen
+        compressor.threshold.setValueAtTime(-24, ctx.currentTime);
+        // Knee suave (12 dB): transición suave y natural sin saltos bruscos
+        compressor.knee.setValueAtTime(12, ctx.currentTime);
+        // Ratio 4:1: compresión controlada típica de locución profesional
+        compressor.ratio.setValueAtTime(4, ctx.currentTime);
+        // Ataque ultrarrápido (3 ms): frena picos y explosiones de voz al instante
+        compressor.attack.setValueAtTime(0.003, ctx.currentTime);
+        // Relajación natural (250 ms): evita fluctuaciones de nivel (pumping)
+        compressor.release.setValueAtTime(0.25, ctx.currentTime);
+
+        // 2. Amplificador de ganancia compensatoria (+3.5 dB) y control de volumen
+        const gainNode = ctx.createGain();
+        const effectiveGain = isMuted ? 0 : volume * 1.5;
+        gainNode.gain.setValueAtTime(effectiveGain, ctx.currentTime);
+
+        // Cadena: AudioElement -> Compresor -> Ganancia de salida -> Altavoces
+        source.connect(compressor);
+        compressor.connect(gainNode);
+        gainNode.connect(ctx.destination);
+
+        compressorRef.current = compressor;
+        gainNodeRef.current = gainNode;
+      }
+    } catch (err) {
+      console.warn('[AudioPlayer] Web Audio API setup aviso:', err);
+    }
+  }, [isMuted, volume]);
+
   // Mecanismo de recuperación progresiva (Fallback) ante bloqueos CORS o errores en dominios personalizados
   const attemptFallbackPlayback = useCallback(async (reason?: string): Promise<boolean> => {
+
     if (!audioRef.current) return false;
     const chapterNum = currentTrack.chapterNumber;
     const currentAttempt = fallbackRetryMapRef.current[chapterNum] || 0;
@@ -368,22 +443,27 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
           audioRef.current.volume = isMuted ? 0 : volume;
 
           if (isPlaying) {
-            audioRef.current.play()
-              .then(() => {
-                if (!isCancelled) {
-                  setAudioError(null);
-                }
-              })
-              .catch(async (err) => {
-                console.warn('[AudioPlayer] Autoplay suspendido o bloqueado, intentando fallback:', err);
-                if (!isCancelled) {
-                  const recovered = await attemptFallbackPlayback('autoplay-blocked');
-                  if (!recovered) {
-                    setIsPlaying(false);
-                  }
-                }
-              });
+            ensureWebAudioInitialized().then(() => {
+              if (!isCancelled && audioRef.current) {
+                audioRef.current.play()
+                  .then(() => {
+                    if (!isCancelled) {
+                      setAudioError(null);
+                    }
+                  })
+                  .catch(async (err) => {
+                    console.warn('[AudioPlayer] Autoplay suspendido o bloqueado, intentando fallback:', err);
+                    if (!isCancelled) {
+                      const recovered = await attemptFallbackPlayback('autoplay-blocked');
+                      if (!recovered) {
+                        setIsPlaying(false);
+                      }
+                    }
+                  });
+              }
+            });
           }
+
         } else {
           if (!isCancelled) {
             if (!navigator.onLine) {
@@ -449,8 +529,12 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     setAudioError(null);
     if (!audioRef.current) return;
 
+    // Desbloquear AudioContext en la interacción del usuario para cumplir con las políticas de autoplay
+    await ensureWebAudioInitialized();
+
     // Si aún no tiene src, está vacío o hubo un error previo, resolver URL
     if (!audioRef.current.src || audioRef.current.src === window.location.href || audioError) {
+
       setIsLoadingAudioUrl(true);
       try {
         let url: string | null = null;
@@ -704,9 +788,14 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = parseFloat(e.target.value);
     setVolume(val);
-    setIsMuted(val === 0);
+    const muted = val === 0;
+    setIsMuted(muted);
     if (audioRef.current) {
       audioRef.current.volume = val;
+    }
+    if (gainNodeRef.current && audioContextRef.current) {
+      const effectiveGain = muted ? 0 : val * 1.5;
+      gainNodeRef.current.gain.setValueAtTime(effectiveGain, audioContextRef.current.currentTime);
     }
   };
 
@@ -714,11 +803,18 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     if (isMuted) {
       setIsMuted(false);
       if (audioRef.current) audioRef.current.volume = volume;
+      if (gainNodeRef.current && audioContextRef.current) {
+        gainNodeRef.current.gain.setValueAtTime(volume * 1.5, audioContextRef.current.currentTime);
+      }
     } else {
       setIsMuted(true);
       if (audioRef.current) audioRef.current.volume = 0;
+      if (gainNodeRef.current && audioContextRef.current) {
+        gainNodeRef.current.gain.setValueAtTime(0, audioContextRef.current.currentTime);
+      }
     }
   };
+
 
   // Filtrado de capítulos por búsqueda (número, consejo o texto del título)
   const filteredTracks = useMemo(() => {
